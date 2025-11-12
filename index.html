@@ -562,10 +562,19 @@ Forma de Pagamento: ${paymentMethod}
   <!-- Filtro de Período -->
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
     <div style="font-weight:700;">Período:</div>
-    <div id="periodFilters" style="display:flex;gap:8px;margin-left:6px">
-      <button class="pill period-btn active" data-period="day">Dia</button>
-      <button class="pill period-btn" data-period="week">Semana</button>
-      <button class="pill period-btn" data-period="month">Mês</button>
+    <div id="periodFilters" style="display:flex;gap:8px;margin-left:6px; flex-wrap: wrap;">
+      <button class="pill period-btn" data-period="day" onclick="setSalesPeriod('day')">Dia</button>
+      <button class="pill period-btn" data-period="week" onclick="setSalesPeriod('week')">Semana</button>
+      <button class="pill period-btn" data-period="month" onclick="setSalesPeriod('month')">Mês</button>
+      <button class="pill period-btn active" data-period="total" onclick="setSalesPeriod('total')">Total</button>
+      
+      <!-- Seletor de Período Personalizado -->
+      <div style="display:flex; gap: 4px; align-items: center; margin-left: 10px;">
+        <input type="date" id="startDate" style="padding: 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px;">
+        <span style="color: var(--muted);">até</span>
+        <input type="date" id="endDate" style="padding: 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px;">
+        <button id="btnFilterCustom" class="pill period-btn" data-period="custom" onclick="setSalesPeriod('custom')" style="background: #007bff; color: white;">Personalizado</button>
+      </div>
     </div>
     <div style="margin-left:auto;font-size:13px;color:var(--muted)">Apenas pedidos com status <strong>entregue</strong> são considerados.</div>
   </div>
@@ -909,7 +918,74 @@ Forma de Pagamento: ${paymentMethod}
 
     
     
-    <div class="modal" id="comandaModal">
+    <!-- Modal de Escolha Comanda -->
+<div class="modal" id="comandaChoiceModal">
+  <div class="card" role="dialog" aria-modal="true" style="max-width:400px; text-align:center;">
+    <h3>Escolha o Tipo de Comanda</h3>
+    <p style="color:var(--muted); margin-bottom: 20px;">Selecione o tipo de comanda avulsa que deseja abrir.</p>
+
+    <div style="display:flex; flex-direction:column; gap:15px;">
+      <button class="btn" id="btnComandaValor" style="background:var(--primary); padding: 15px;">
+        🧾 Comanda-Valor (Valor Fixo)
+      </button>
+      <button class="btn" id="btnComandaPeso" style="background:#28a745; padding: 15px;">
+        ⚖️ Comanda-Peso (Peso x Valor/Kg)
+      </button>
+    </div>
+
+    <button class="pill" style="margin-top:20px;" onclick="document.getElementById('comandaChoiceModal').classList.remove('open')">Cancelar</button>
+  </div>
+</div>
+
+<!-- Modal Comanda Avulsa (Por Peso) -->
+<div class="modal" id="comandaPesoModal">
+  <div class="card" role="dialog" aria-modal="true" style="max-width:400px;">
+    <h3>⚖️ Comanda Avulsa por Peso</h3>
+    <form id="comandaPesoForm">
+      <div class="form-group">
+        <label for="comandaPesoName">Nome do Cliente</label>
+        <input type="text" id="comandaPesoName" required placeholder="Ex: João da Silva">
+      </div>
+
+      <div class="form-group">
+        <label for="comandaPesoWeight">Peso (kg)</label>
+        <input type="number" id="comandaPesoWeight" step="0.001" min="0.001" required placeholder="Ex: 0.500">
+      </div>
+
+      <div class="form-group">
+        <label for="comandaPesoValuePerKg">Valor por kg (R$)</label>
+        <input type="number" id="comandaPesoValuePerKg" step="0.01" min="0.01" required placeholder="Ex: 59.90">
+      </div>
+
+      <div class="form-group">
+        <label for="comandaPesoTotal">Total (R$)</label>
+        <input type="text" id="comandaPesoTotal" readonly style="font-weight:bold; color:var(--primary);">
+      </div>
+
+      <div class="form-group">
+        <label for="comandaPesoPayment">Forma de Pagamento</label>
+        <select id="comandaPesoPayment" required>
+          <option value="pix">PIX</option>
+          <option value="credit">Cartão de Crédito</option>
+          <option value="debit">Cartão de Débito</option>
+          <option value="cash">Dinheiro</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="comandaPesoCPF">CPF na Nota (opcional)</label>
+        <input type="text" id="comandaPesoCPF" placeholder="000.000.000-00">
+      </div>
+
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:20px;">
+        <button type="button" class="pill" id="comandaPesoCancel">Cancelar</button>
+        <button type="submit" class="btn" style="background:#28a745;">Salvar Comanda por Peso</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="comandaModal">
       <div class="card" role="dialog" aria-modal="true" style="max-width:520px; position:relative;">
         <h3 style="margin:0 0 10px;">Criar Comanda Avulsa</h3>
         <form id="comandaForm" style="display:flex;flex-direction:column;gap:10px;">
@@ -2995,7 +3071,53 @@ function renderAdminOrders() {
 }
 
 
-function calculateDailySales() {
+window.filterOrdersByPeriod = function(orders, period) {
+  const now = new Date();
+  let startDate;
+
+  switch (period) {
+    case 'day':
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      break;
+    case 'week':
+      // Começa no domingo (0)
+      const dayOfWeek = now.getDay();
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'month':
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      break;
+    case 'custom':
+      const startInput = document.getElementById('startDate');
+      const endInput = document.getElementById('endDate');
+      
+      if (!startInput.value || !endInput.value) {
+        alert('Por favor, selecione as datas de início e fim para o filtro personalizado.');
+        return []; // Retorna lista vazia se as datas não estiverem preenchidas
+      }
+      
+      // Converte as strings de data para objetos Date
+      const customStart = new Date(startInput.value + 'T00:00:00');
+      const customEnd = new Date(endInput.value + 'T23:59:59'); // Inclui o dia final
+      
+      return orders.filter(order => {
+        const orderDate = new Date(order.createdAt);
+        return orderDate >= customStart && orderDate <= customEnd;
+      });
+    case 'total':
+    default:
+      // Não filtra, retorna todos os pedidos
+      return orders;
+  }
+
+  return orders.filter(order => {
+    const orderDate = new Date(order.createdAt);
+    return orderDate >= startDate;
+  });
+}
+
+window.calculateDailySales = function() {
   const salesByDay = {}; // { 'YYYY-MM-DD': total }
   
   // Filtra apenas pedidos entregues
@@ -3036,16 +3158,21 @@ function calculateDailySales() {
   return chartData;
 }
 
-function renderSalesMetrics() {
-  // 1. Filtra pedidos entregues e calcula métricas
-  const deliveredOrders = ((orders || [])).filter(o => o.status === 'delivered');
-  const totalSales = deliveredOrders.reduce((sum, order) => sum + (order.total || 0), 0);
-  const totalCount = deliveredOrders.length;
+window.renderSalesMetrics = function() {
+  // 1. Filtra pedidos entregues
+  const allDeliveredOrders = ((orders || [])).filter(o => o.status === 'delivered');
+  
+  // Filtra os pedidos pelo período selecionado
+  const filteredOrders = filterOrdersByPeriod(allDeliveredOrders, currentSalesPeriod);
+  
+  // Calcula métricas com base nos pedidos filtrados
+  const totalSales = filteredOrders.reduce((sum, order) => sum + (order.total || 0), 0);
+  const totalCount = filteredOrders.length;
   const avgTicket = totalCount > 0 ? totalSales / totalCount : 0;
 
   // 2. Calcula Top Produtos
   const productSales = {};
-  deliveredOrders.forEach(order => {
+  filteredOrders.forEach(order => {
     (order.items || []).forEach(item => {
       const name = item.name;
       productSales[name] = (productSales[name] || 0) + item.qty;
@@ -3057,7 +3184,7 @@ function renderSalesMetrics() {
 
   // 3. Calcula Formas de Pagamento
   const paymentCounts = {};
-  deliveredOrders.forEach(order => {
+  filteredOrders.forEach(order => {
     const method = order.paymentMethod || 'Outro';
     paymentCounts[method] = (paymentCounts[method] || 0) + 1;
   });
@@ -3070,7 +3197,7 @@ function renderSalesMetrics() {
 
   // 4. Calcula Performance por Área de Entrega
   const areaStats = {};
-  deliveredOrders.forEach(order => {
+  filteredOrders.forEach(order => {
     const area = order.deliveryAreaName || 'Retirada/Local';
     areaStats[area] = areaStats[area] || { count: 0, total: 0 };
     areaStats[area].count += 1;
@@ -3087,6 +3214,13 @@ function renderSalesMetrics() {
   if (cardRevenue) cardRevenue.textContent = formatBRL(totalSales); // Total de Vendas (Corrigido o ID)
   const cardTopArea = document.getElementById('cardTopArea');
   if (cardTopArea) cardTopArea.textContent = topArea ? topArea[0] : 'N/A';
+  
+  // Garante que o botão ativo está com o estilo correto após a renderização
+  document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
+  const activeBtn = document.querySelector(`#periodFilters button[data-period="${currentSalesPeriod}"]`);
+  if (activeBtn) {
+    activeBtn.classList.add('active');
+  }
 
   // 6. Renderiza Tabela Top Produtos
   const tableTopProductsBody = document.querySelector('#tableTopProducts tbody');
@@ -3131,7 +3265,41 @@ function renderSalesMetrics() {
   });
 }
 
-function renderAdminDashboard() {
+let currentSalesPeriod = 'total'; // Variável global para o período de vendas
+
+window.setSalesPeriod = function(period) {
+  // Lógica de validação para o filtro 'custom'
+  if (period === 'custom') {
+    const startInput = document.getElementById('startDate');
+    const endInput = document.getElementById('endDate');
+    
+    if (!startInput.value || !endInput.value) {
+      alert('Por favor, selecione as datas de início e fim para o filtro personalizado.');
+      // Não muda o período atual se a validação falhar
+      return; 
+    }
+  }
+  
+  currentSalesPeriod = period;
+  
+  // Remove a classe 'active' de todos os botões
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  
+  // Adiciona a classe 'active' ao botão clicado
+  const activeBtn = document.querySelector(`#periodFilters button[data-period="${period}"]`);
+  if (activeBtn) {
+    activeBtn.classList.add('active');
+  }
+  
+  // Recalcula e renderiza o dashboard com o novo período
+  renderAdminDashboard();
+}
+
+window.renderAdminDashboard = function() {
+  // O gráfico de vendas diárias (calculateDailySales) é mantido para os últimos 7 dias,
+  // mas as métricas (renderSalesMetrics) serão filtradas pelo período.
   const { labels, data } = calculateDailySales();
   
   renderSalesMetrics(); // Adicionado: Renderiza as métricas e tabelas
@@ -4000,6 +4168,92 @@ document.addEventListener("DOMContentLoaded", () => {
   if(document.querySelector("#btnViewOrders")) document.querySelector("#btnViewOrders").addEventListener('click', openOrdersDrawerHandler);
   if(document.querySelector("#closeOrdersDrawer")) document.querySelector("#closeOrdersDrawer").addEventListener('click', closeOrdersDrawerHandler);
 
+window.reorderItems = async function(orderId) { // Tornando a função assíncrona
+  const order = orders.find(o => o.id === orderId);
+  if (!order) {
+    alert('Pedido não encontrado.');
+    return;
+  }
+
+  // === CORREÇÃO: Garantir que o DATA (cardápio) esteja carregado ===
+  if (!DATA || !DATA.items) {
+    alert('Carregando dados do cardápio. Tente novamente em instantes.');
+    // Tenta carregar os dados. A função fetchMenuData é assíncrona.
+    if (typeof fetchMenuData === 'function') {
+      await fetchMenuData();
+    } else {
+      console.error('fetchMenuData não está definida. Não é possível carregar o cardápio.');
+      alert('Erro ao carregar o cardápio. Verifique o console.');
+      return;
+    }
+  }
+  // =================================================================
+
+  let itemsAdded = 0;
+  
+  order.items.forEach(item => {
+    // Tenta encontrar o item original no menu (DATA.items)
+    const originalItem = DATA.items.find(i => i.id === item.itemId);
+    
+    if (originalItem) {
+      // A função addItemToCart espera: item, qty, addons.
+      // O parâmetro `addons` deve ser a estrutura de seleção do modal:
+      // [ { groupId: '...', selected: [ { addonId: '...', qty: 1 } ] } ]
+      
+      // O `item.addons` do pedido anterior (item) é provavelmente uma lista plana de addons selecionados.
+      // Vamos tentar reconstruir a estrutura de seleção.
+      
+      const addonsToReorder = [];
+      
+      // Verifica se o item do pedido tem addons e se o item original tem grupos de addons
+      if (Array.isArray(item.addons) && Array.isArray(originalItem.addonGroups)) {
+        
+        // Itera sobre os grupos de addons do item original (menu)
+        originalItem.addonGroups.forEach(group => {
+          const selectedAddons = [];
+          
+          // Itera sobre os addons do pedido anterior para encontrar os que pertencem a este grupo
+          item.addons.forEach(addonFromOrder => {
+            // Tenta encontrar o addon correspondente no grupo atual do item original
+            // A busca é feita pelo NOME, pois é a informação mais estável no objeto de pedido.
+            const originalAddon = group.addons.find(a => a.name === addonFromOrder.name);
+            
+            // Se o addon for encontrado no grupo, adiciona à lista de selecionados
+            if (originalAddon) {
+              selectedAddons.push({
+                addonId: originalAddon.id,
+                qty: addonFromOrder.qty // Usa a quantidade do pedido anterior
+              });
+            }
+          });
+          
+          // Se houver addons selecionados neste grupo, adiciona ao array de reconstrução
+          if (selectedAddons.length > 0) {
+            addonsToReorder.push({
+              groupId: group.id,
+              selected: selectedAddons
+            });
+          }
+        });
+      }
+      
+      // Passa a estrutura reconstruída para addItemToCart
+      addItemToCart(originalItem, item.qty, addonsToReorder);
+      itemsAdded++;
+    } else {
+      console.warn(`Item com ID ${item.itemId} não encontrado no menu atual.`);
+    }
+  });
+
+  if (itemsAdded > 0) {
+    alert(`${itemsAdded} itens do pedido #${order.id.substring(0, 7)} foram adicionados ao seu carrinho!`);
+    // Fecha o modal de pedidos
+    document.getElementById('ordersDrawer').classList.remove('open');
+  } else {
+    alert('Nenhum item do pedido pôde ser adicionado ao carrinho. Verifique se os itens ainda estão disponíveis.');
+  }
+}
+
   window.renderOrdersDrawer = function() {
     const list = document.getElementById('ordersDrawerList');
     if(!list) return;
@@ -4014,13 +4268,33 @@ document.addEventListener("DOMContentLoaded", () => {
       const div = document.createElement('div');
       div.className = 'order-item';
       div.style.cssText = 'border:1px solid #eee;border-radius:10px;padding:10px;margin-bottom:8px;box-shadow:0 4px 8px rgba(0,0,0,0.03);';
+      // Geração da lista de itens detalhada
+      const itemsListHtml = (order.items || []).map(item => {
+        let itemHtml = `<div style="margin-left:10px; margin-top:4px; border-left:2px solid #eee; padding-left:6px;">
+          ${item.qty}x ${item.name} (${formatBRL(item.totalPrice / item.qty)} cada)
+          ${item.addons && item.addons.length > 0 ? `<div class="small" style="color:var(--muted); margin-left:5px;">+ ${(item.addons || []).map(a => `${a.qty}x ${a.name}`).join(', ')}</div>` : ''}
+        </div>`;
+        return itemHtml;
+      }).join('');
+
       div.innerHTML = ''
-        + '<div style="display:flex;justify-content:space-between;align-items:center;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
         + '<strong style="font-size:15px;">Pedido #' + (order.id ? order.id.substring(0,7) : '') + '</strong>'
-        + '<span style="font-weight:600;color:' + (statusInfo.color || '#000') + ';">' + (statusInfo.label || '') + '</span>'
+        + '<span style="font-weight:600;color:' + (statusInfo.color || '#000') + '; margin-left: 10px;">' + (statusInfo.label || '') + '</span>'
         + '</div>'
-        + '<div class="small" style="color:var(--muted);margin:4px 0;">' + (new Date(order.createdAt).toLocaleDateString()) + ' — Total ' + formatBRL(order.total) + '</div>'
-        + '<div style="font-size:13px;color:#444;line-height:1.4;">' + (order.items.map(i => i.qty + 'x ' + i.name).join('<br>')) + '</div>';
+        + '<div class="small" style="color:var(--muted);margin:4px 0;">'
+        + 'Data: ' + (new Date(order.createdAt).toLocaleDateString()) + ' ' + (new Date(order.createdAt).toLocaleTimeString()) + '<br>'
+        + 'Total: ' + formatBRL(order.total) + '<br>'
+        + 'Endereço: ' + (order.address || 'Retirada no Local') + '<br>'
+        + 'Pagamento: ' + (order.paymentMethod || 'N/A')
+        + '</div>'
+        + '<div style="font-size:14px; margin-bottom:10px;">'
+        + '<strong>Itens:</strong>'
+        + itemsListHtml
+        + '</div>'
+        + '<div style="text-align:right; margin-top: 10px;">'
+        + `<button class="pill" style="background: var(--primary); color: white; padding: 6px 12px; font-size: 13px;" onclick="window.reorderItems('${order.id}')">Pedir Novamente</button>`
+        + '</div>';
       list.appendChild(div);
     });
   };
@@ -4077,20 +4351,56 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // === Comanda Avulsa: handler UI e envio ===
 document.addEventListener("DOMContentLoaded", () => {
-  const btnComanda = document.getElementById("btnComandaAvulsa");
+  // Elementos existentes
+  const btnComandaAvulsa = document.getElementById("btnComandaAvulsa");
   const comandaModal = document.getElementById("comandaModal");
   const comandaForm = document.getElementById("comandaForm");
   const comandaCancel = document.getElementById("comandaCancel");
 
-  if (btnComanda && comandaModal) {
-    btnComanda.addEventListener("click", () => {
+  // Novos elementos
+  const comandaChoiceModal = document.getElementById("comandaChoiceModal");
+  const btnComandaValor = document.getElementById("btnComandaValor");
+  const btnComandaPeso = document.getElementById("btnComandaPeso");
+  const comandaPesoModal = document.getElementById("comandaPesoModal");
+  const comandaPesoForm = document.getElementById("comandaPesoForm");
+  const comandaPesoCancel = document.getElementById("comandaPesoCancel");
+  const comandaPesoWeight = document.getElementById("comandaPesoWeight");
+  const comandaPesoValuePerKg = document.getElementById("comandaPesoValuePerKg");
+  const comandaPesoTotal = document.getElementById("comandaPesoTotal");
+
+  // 1. Botão principal abre o modal de escolha
+  if (btnComandaAvulsa && comandaChoiceModal) {
+    btnComandaAvulsa.addEventListener("click", () => {
+      comandaChoiceModal.classList.add("open");
+    });
+  }
+
+  // 2. Botão Comanda-Valor abre o modal existente
+  if (btnComandaValor && comandaModal) {
+    btnComandaValor.addEventListener("click", () => {
+      comandaChoiceModal.classList.remove("open");
       comandaModal.classList.add("open");
+      comandaForm.reset();
       // focus no primeiro campo
       const f = document.getElementById("comandaName");
       if (f) f.focus();
     });
   }
 
+  // 3. Botão Comanda-Peso abre o novo modal
+  if (btnComandaPeso && comandaPesoModal) {
+    btnComandaPeso.addEventListener("click", () => {
+      comandaChoiceModal.classList.remove("open");
+      comandaPesoModal.classList.add("open");
+      comandaPesoForm.reset();
+      if(comandaPesoTotal) comandaPesoTotal.value = formatBRL(0);
+      // focus no primeiro campo
+      const f = document.getElementById("comandaPesoName");
+      if (f) f.focus();
+    });
+  }
+
+  // --- Comanda Avulsa (Valor Fixo) ---
   if (comandaCancel) {
     comandaCancel.addEventListener("click", () => {
       comandaModal.classList.remove("open");
@@ -4102,7 +4412,8 @@ document.addEventListener("DOMContentLoaded", () => {
     comandaForm.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const name = document.getElementById("comandaName").value.trim();
-      const value = parseFloat(document.getElementById("comandaValue").value) || 0;
+      // Adicionado replace para garantir que o ponto seja usado como separador decimal
+      const value = parseFloat(document.getElementById("comandaValue").value.replace(',', '.')) || 0; 
       const payment = document.getElementById("comandaPayment").value;
       const cpf = document.getElementById("comandaCPF").value.trim();
 
@@ -4139,6 +4450,88 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Comanda avulsa criada com sucesso.");
       } catch (err) {
         console.error("Falha ao salvar comanda avulsa:", err);
+        alert("Erro ao criar comanda. Verifique a conexão.");
+      }
+    });
+  }
+
+  // --- Comanda Avulsa (Por Peso) ---
+  // Lógica de cálculo automático
+  function updateComandaPesoTotal() {
+    // Adicionado replace para garantir que o ponto seja usado como separador decimal
+    const weight = parseFloat(comandaPesoWeight.value.replace(',', '.')) || 0;
+    const valuePerKg = parseFloat(comandaPesoValuePerKg.value.replace(',', '.')) || 0;
+    const total = weight * valuePerKg;
+    if(comandaPesoTotal) comandaPesoTotal.value = formatBRL(total);
+  }
+
+  if (comandaPesoWeight) {
+    comandaPesoWeight.addEventListener("input", updateComandaPesoTotal);
+  }
+  if (comandaPesoValuePerKg) {
+    comandaPesoValuePerKg.addEventListener("input", updateComandaPesoTotal);
+  }
+
+  // Lógica de cancelamento
+  if (comandaPesoCancel) {
+    comandaPesoCancel.addEventListener("click", () => {
+      comandaPesoModal.classList.remove("open");
+      comandaPesoForm.reset();
+    });
+  }
+
+  // Lógica de submissão
+  if (comandaPesoForm) {
+    comandaPesoForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const name = document.getElementById("comandaPesoName").value.trim();
+      const weight = parseFloat(comandaPesoWeight.value.replace(',', '.')) || 0;
+      const valuePerKg = parseFloat(comandaPesoValuePerKg.value.replace(',', '.')) || 0;
+      const total = weight * valuePerKg;
+      const payment = document.getElementById("comandaPesoPayment").value;
+      const cpf = document.getElementById("comandaPesoCPF").value.trim();
+
+      if (!name || total <= 0) {
+        alert("Preencha o nome do cliente, peso e valor/kg corretamente para calcular um total maior que zero.");
+        return;
+      }
+
+      // Monta o objeto do pedido
+      const newOrder = {
+        userId: "comanda_peso_" + Date.now().toString(),
+        userName: name,
+        userPhone: "",
+        address: "",
+        deliveryAreaId: "",
+        deliveryAreaName: "Comanda Avulsa (Peso)",
+        deliveryFee: 0,
+        items: [{
+            name: `Comanda por Peso (${weight.toFixed(3)}kg @ ${formatBRL(valuePerKg)}/kg)`,
+            qty: 1,
+            price: total,
+            totalPrice: total,
+            isComandaPeso: true,
+            weight: weight,
+            valuePerKg: valuePerKg
+        }],
+        subtotal: total,
+        total: total,
+        paymentMethod: payment,
+        cpfOnReceipt: cpf || null,
+        type: "comandaAvulsaPeso",
+        status: "pending",
+        createdAt: new Date().toISOString()
+      };
+
+      try {
+        // usa a mesma coleção de pedidos em tempo real
+        await addDoc(ordersCollectionRef, newOrder);
+        // fecha modal e limpa form
+        comandaPesoModal.classList.remove("open");
+        comandaPesoForm.reset();
+        alert("Comanda por peso criada com sucesso.");
+      } catch (err) {
+        console.error("Falha ao salvar comanda por peso:", err);
         alert("Erro ao criar comanda. Verifique a conexão.");
       }
     });
