@@ -1567,12 +1567,23 @@ document.getElementById('motoboyForm')?.addEventListener('submit', async (e) => 
 window._updateOrderMotoboy = async function(orderId, motoboyId){
   try {
     const orderDocRef = doc(db, "orders", orderId);
+    let motoboyName = "";
     if(!motoboyId){
       await updateDoc(orderDocRef, { motoboyId: "", motoboyName: "" });
-      return;
+    } else {
+      const m = motoboys.find(x => x.id === motoboyId);
+      motoboyName = m ? m.name : "";
+      await updateDoc(orderDocRef, { motoboyId: motoboyId, motoboyName: motoboyName });
     }
-    const m = motoboys.find(x => x.id === motoboyId);
-    await updateDoc(orderDocRef, { motoboyId: motoboyId, motoboyName: m ? m.name : "" });
+    
+    // Atualização local do array 'orders' para evitar re-render global
+    const orderIndex = orders.findIndex(o => o.id === orderId);
+    if (orderIndex !== -1) {
+        orders[orderIndex].motoboyId = motoboyId;
+        orders[orderIndex].motoboyName = motoboyName;
+    }
+    
+    // loadOrders() removido para evitar re-render global e colapso dos cards
   } catch (e) {
     console.error('Erro ao vincular motoboy:', e);
     alert('Falha ao salvar o motoboy no pedido.');
@@ -3357,7 +3368,7 @@ function renderAdminOrders(){
     let totalDisplay = formatBRL(order.total);
 
     let detailsHTML = `
-      <div class='order-details' style='display:none; margin-top:8px;font-size:13px;color:#444;'>
+      <div class='order-details' style='margin-top:8px;font-size:13px;color:#444;'>
         <b>Cliente:</b> ${order.userName || "N/A"}<br>
         <b>Endereço:</b> ${order.address || "N/A"}<br>
         <b>Área de Entrega:</b> ${order.neighborhood || "N/A"}<br>
@@ -3368,7 +3379,12 @@ function renderAdminOrders(){
         <div class='order-btns' style='display:flex; gap: 5px; flex-wrap: wrap; position: relative;'>
           <!-- Botão 'Atualizar Status' -->
           <button style='background:#ff9800;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer; position: relative;' onclick='event.stopPropagation(); openStatusSelector(this, "${order.id}")'>Atualizar Status</button>
-          <button style='background:#03a9f4;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer;' onclick='event.stopPropagation(); openMotoboySelector("${order.id}", "${order.motoboyId || ''}")'>Motoboy: ${order.motoboyName || '— Selecionar —'}</button>
+          <div class="motoboy-select-wrapper" style="display: inline-block; margin-right: 5px;">
+              <select class="pill motoboy-select" onclick="event.stopPropagation()" onchange="event.stopPropagation(); window._updateOrderMotoboy && window._updateOrderMotoboy('${order.id}', this.value)" style="padding: 5px 8px; border: 1px solid #03a9f4; border-radius: 5px; cursor: pointer; background: #fff; color: #03a9f4;">
+                <option value="">Motoboy: — Selecionar —</option>
+                ${ (motoboys||[]).map(m => `<option value="${m.id}" ${order.motoboyId === m.id ? 'selected' : ''}>${m.name}</option>`).join('')}
+              </select>
+            </div>
           <button style='background:#4caf50;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer;' onclick='event.stopPropagation(); printOrder("${order.id}")'>🖨️ Imprimir</button>
         </div>
       </div>`;
@@ -3380,10 +3396,7 @@ function renderAdminOrders(){
       ${detailsHTML}
     `;
 
-    div.addEventListener("click",()=>{
-        let box=div.querySelector(".order-details");
-        box.style.display= box.style.display==="none" ? "block" : "none";
-    });
+    
 
     if(normalizedStatus==="pending") colPending.appendChild(div);
     else if(normalizedStatus==="in_production" || order.status==="accepted") colInProduction.appendChild(div);
@@ -4580,6 +4593,7 @@ window.reorderItems = async function(orderId) { // Tornando a função assíncro
 }
 
   window.renderOrdersDrawer = function() {
+  loadMotoboys(); // Garante que a lista de motoboys está carregada antes de renderizar os pedidos
     const list = document.getElementById('ordersDrawerList');
     if(!list) return;
     list.innerHTML = '';
@@ -5575,3 +5589,106 @@ document.getElementById("tabCustomers").addEventListener("click", () => {
 
 
 
+<script>
+// INÍCIO: Lógica de Motoboy (Adicionado para corrigir o seletor)
+let motoboys = []; 
+const motoboysCollectionRef = collection(db, "motoboys");
+
+async function loadMotoboys() {
+  try {
+    const snap = await getDocs(motoboysCollectionRef);
+    motoboys = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderMotoboysList();
+  } catch (e) {
+    console.error("Erro ao carregar motoboys:", e);
+  }
+}
+
+function renderMotoboysList() {
+  const container = document.getElementById("motoboysList");
+  if (!container) return;
+
+  if(!motoboys || motoboys.length === 0){
+    container.innerHTML = '<div class="small" style="color:var(--muted);">Nenhum motoboy cadastrado.</div>';
+    return;
+  }
+
+  container.innerHTML = motoboys.map(m => {
+    const deliveredCount = (orders || []).filter(o => o.motoboyId === m.id && o.status === 'delivered').length;
+    return `
+      <div class="item">
+        <div class="info">
+          <h3>${m.name}</h3>
+          <p>Tel: ${m.phone}</p>
+          <p>Entregas concluídas: ${deliveredCount}</p>
+        </div>
+        <div class="actions">
+          <button class="btn btn-danger" onclick="deleteMotoboy('${m.id}')">Excluir</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+window.openMotoboyModal = function(){
+  document.getElementById('motoboyModal').classList.add('open');
+}
+
+window.deleteMotoboy = async function(motoboyId){
+  if(!confirm("Tem certeza que deseja excluir este motoboy?")){
+    return;
+  }
+  try {
+    await deleteDoc(doc(db, "motoboys", motoboyId));
+    loadMotoboys();
+    loadOrders();
+  } catch (e) {
+    console.error("Erro ao deletar motoboy:", e);
+    alert("Falha ao deletar motoboy.");
+  }
+}
+
+document.getElementById('motoboyForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('motoboyName').value.trim();
+  const phone = document.getElementById('motoboyPhone').value.trim();
+  if(!name){ alert('Informe o nome do motoboy'); return; }
+
+  try {
+    await addDoc(motoboysCollectionRef, { name, phone, createdAt: Date.now() });
+    document.getElementById('motoboyForm').reset();
+    document.getElementById('motoboyModal').classList.remove('open');
+    loadMotoboys();
+  } catch (err) {
+    console.error('Erro ao salvar motoboy:', err);
+    alert('Falha ao salvar motoboy.');
+  }
+});
+
+window._updateOrderMotoboy = async function(orderId, motoboyId){
+  try {
+    const orderDocRef = doc(db, "orders", orderId);
+    let motoboyName = "";
+    if(!motoboyId){
+      await updateDoc(orderDocRef, { motoboyId: "", motoboyName: "" });
+    } else {
+      const m = motoboys.find(x => x.id === motoboyId);
+      motoboyName = m ? m.name : "";
+      await updateDoc(orderDocRef, { motoboyId: motoboyId, motoboyName: motoboyName });
+    }
+    
+    // Atualização local do array 'orders' para evitar re-render global
+    const orderIndex = orders.findIndex(o => o.id === orderId);
+    if (orderIndex !== -1) {
+        orders[orderIndex].motoboyId = motoboyId;
+        orders[orderIndex].motoboyName = motoboyName;
+    }
+    
+    // loadOrders() removido para evitar re-render global e colapso dos cards
+  } catch (e) {
+    console.error('Erro ao vincular motoboy:', e);
+    alert('Falha ao salvar o motoboy no pedido.');
+  }
+}
+// FIM: Lógica de Motoboy
+</script>
