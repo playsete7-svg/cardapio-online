@@ -79,7 +79,7 @@ window.printOrder = function(orderId) {
 
   // Geração da lista de itens
   const itemsList = (order.items || []).map(item => {
-    let itemHtml = `<div class="footer-line"><span>${item.qty}x ${item.name}</span><span>${formatBRL(item.price)}</span></div>`;
+    let itemHtml = `<div class="footer-line"><span>${item.qty}x ${item.name}</span><span>${formatBRL(item.totalPrice / item.qty)}</span></div>`;
     if (item.addons && item.addons.length > 0) {
       item.addons.forEach(a => {
         itemHtml += `<div class="item-addon"> &nbsp; &nbsp; + ${a.qty}x ${a.name}</div>`;
@@ -284,7 +284,7 @@ Forma de Pagamento: ${paymentMethod}
   .auth-tabs{display:flex;gap:8px;margin-bottom:16px}
   .auth-tabs button{flex:1;padding:10px;border:0;background:#f5f5f5;border-radius:8px;cursor:pointer;font-weight:600}
   .auth-tabs button.active{background:var(--primary);color:#fff}
-  .admin-tabs{display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid #eee;padding-bottom:8px;overflow-x:auto;}
+  .admin-tabs{display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid #eee;padding-bottom:8px;overflow-x:auto;}.admin-tabs::-webkit-scrollbar{height:4px;}.admin-tabs::-webkit-scrollbar-thumb{background:var(--primary);border-radius:2px;}
   .admin-tabs button{flex-shrink:0;padding:10px 15px;border:0;background:#f5f5f5;border-radius:8px;cursor:pointer;font-weight:600;}
   .admin-tabs button.active{background:var(--primary);color:#fff;}
   .admin-panel{padding-top:10px;}
@@ -326,6 +326,7 @@ Forma de Pagamento: ${paymentMethod}
 }
 
 .menu-card {
+  padding:12px;
   background: #fff;
   border-radius: 16px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);
@@ -546,15 +547,45 @@ Forma de Pagamento: ${paymentMethod}
               <button id="tabCustomers">Controle de Clientes</button>
               <button id="tabSettings">Configurações da Loja</button>
               <button id="tabPDV">PDV (Mesas)</button>
+              <button id="tabMotoboys">Motoboy</button>
               <button id="btnComandaAvulsa" class="pill" style="background:#ffe6b3; color:#663300; font-weight:700; margin-left:6px;">Comanda Avulsa</button>
               <button id="closeAdminModal" style="text-align:right;margin-top:16px">Fechar</button>
             </div>
 
             <div id="adminContent">
-              <div id="ordersPanel" class="admin-panel">
-                <h4>Pedidos Atuais</h4>
-                <div id="currentOrdersList"></div>
-              </div>
+              
+<div id="ordersPanel" class="admin-panel">
+  <h4>Pedidos em Tempo Real</h4>
+
+  <style>
+    #kanbanWrapper {
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:12px;
+      overflow-x: auto; /* Permite rolagem horizontal em telas grandes se necessário */
+      padding-bottom: 10px; /* Espaço para a barra de rolagem */
+    }
+    @media (max-width: 768px) {
+      #kanbanWrapper {
+        grid-template-columns: repeat(4, 250px); /* Mantém 4 colunas, mas com largura fixa para rolagem */
+        grid-auto-flow: column; /* Garante que as colunas fiquem lado a lado */
+      }
+    }
+    .kanban-column {background:#f5f5f5;padding:10px;border-radius:12px;min-height:300px;max-height:70vh;overflow-y:auto;}
+    .kanban-title {font-weight:700;color:#fff;padding:8px;border-radius:8px;text-align:center;margin-bottom:8px;}
+    .order-card {background:#fff;border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,0.1);padding:10px;margin-bottom:10px;}
+    .order-card-header{display:flex;justify-content:space-between;font-weight:700;}
+    .order-card-items{font-size:13px;margin-top:6px;border-left:3px solid #eee;padding-left:6px;}
+  </style>
+
+  <div id="kanbanWrapper">
+    <div class="kanban-column" id="col_pending"><div class="kanban-title" style="background:#ff9800">🟧 Em Análise</div></div>
+    <div class="kanban-column" id="col_in_production"><div class="kanban-title" style="background:#17a2b8">🟨 Em Produção</div></div>
+    <div class="kanban-column" id="col_ready_for_delivery"><div class="kanban-title" style="background:#03A9F4">🟦 Pronto para Entregar</div></div>
+    <div class="kanban-column" id="col_delivered"><div class="kanban-title" style="background:#4CAF50">✔️ Concluídos</div></div>
+  </div>
+</div>
+</div>
               
 <div id="salesPanel" class="admin-panel hidden">
   <h4>Relatório de Vendas</h4>
@@ -692,6 +723,18 @@ Forma de Pagamento: ${paymentMethod}
                   </div>
                 </form>
               </div>
+              
+              <div id="motoboysPanel" class="admin-panel hidden">
+                <h4>Painel de Motoboys</h4>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                  <div style="font-weight:700;">Motoboys Cadastrados</div>
+                  <div>
+                    <button id="btnOpenMotoboyModal" class="pill" style="background:#e6ffe6; color:#28a745;">+ Cadastrar Motoboy</button>
+                  </div>
+                </div>
+                <div id="motoboysList" class="menu-grid"></div>
+              </div>
+
               <div id="pdvPanel" class="admin-panel hidden">
                 <h4>PDV — Gestão de Mesas</h4>
                 <div id="pdvTablesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;"></div>
@@ -918,7 +961,29 @@ Forma de Pagamento: ${paymentMethod}
 
     
     
-    <!-- Modal de Escolha Comanda -->
+    
+<!-- Modal Cadastro Motoboy -->
+<div class="modal" id="motoboyModal">
+  <div class="card" role="dialog" aria-modal="true" style="max-width:420px">
+    <h3>Cadastrar Motoboy</h3>
+    <form id="motoboyForm">
+      <div class="form-group">
+        <label for="motoboyName">Nome</label>
+        <input type="text" id="motoboyName" required>
+      </div>
+      <div class="form-group">
+        <label for="motoboyPhone">Número de WhatsApp</label>
+        <input type="tel" id="motoboyPhone" required placeholder="(11) 9XXXX-XXXX">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+        <button type="button" class="pill" onclick="document.getElementById('motoboyModal').classList.remove('open')">Cancelar</button>
+        <button type="submit" class="btn">Salvar Motoboy</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal de Escolha Comanda -->
 <div class="modal" id="comandaChoiceModal">
   <div class="card" role="dialog" aria-modal="true" style="max-width:400px; text-align:center;">
     <h3>Escolha o Tipo de Comanda</h3>
@@ -1248,7 +1313,8 @@ const usersCollectionRef = collection(db, "users");
 
 // Variáveis globais
 let DATA = null; 
-let orders = []; 
+let orders = [];
+let motoboys = []; 
 let users = []; 
 
 const CART_KEY = "cardapio_cart_v1";
@@ -1429,6 +1495,94 @@ function setupRealtimeOrdersListener() {
         console.error("Erro no listener de pedidos:", error);
     });
 }
+// === MOTOBOYS FUNCTIONS (single clean block) ===
+const motoboysCollectionRef = collection(db, "motoboys");
+
+async function fetchMotoboys() {
+  try {
+    const snap = await getDocs(motoboysCollectionRef);
+    motoboys = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderMotoboys();
+  } catch (e) {
+    console.error("Erro ao carregar motoboys:", e);
+  }
+}
+
+window.fetchMotoboys = fetchMotoboys;
+
+function renderMotoboys() {
+  const container = document.getElementById("motoboysList");
+  if(!container) return;
+  if(!motoboys || motoboys.length === 0){
+    container.innerHTML = '<div class="small" style="color:var(--muted);">Nenhum motoboy cadastrado.</div>';
+    return;
+  }
+  container.innerHTML = motoboys.map(m => {
+    const deliveredCount = (orders || []).filter(o => o.motoboyId === m.id && o.status === 'delivered').length;
+    const phoneDigits = (m.phone || '').replace(/\D/g, '');
+    return `
+      <div class='menu-card' style='text-align:left;'>
+        <div class='menu-card-body'><div style='display:flex;justify-content:space-between;align-items:center;'>
+            <div>
+              <div class='menu-card-title'>${m.name}</div>
+              <div style='font-size:13px;color:var(--muted);margin-top:6px;'>📞 ${m.phone || '—'}</div>
+              <div style='font-size:13px;color:var(--muted);margin-top:6px;'>🧾 Entregues: <strong>${deliveredCount}</strong></div>
+            </div>
+            <div style='display:flex;flex-direction:column;gap:8px;'>
+              <a href='https://wa.me/${phoneDigits}' target='_blank' class='menu-card-btn' style='background:#25D366;padding:8px 12px;border-radius:10px;'>💬 WhatsApp</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+window.renderMotoboys = renderMotoboys;
+
+// Abre modal de cadastro
+document.getElementById('btnOpenMotoboyModal')?.addEventListener('click', () => {
+  document.getElementById('motoboyModal').classList.add('open');
+});
+
+// Cadastro do motoboy
+document.getElementById('motoboyForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('motoboyName').value.trim();
+  const phone = document.getElementById('motoboyPhone').value.trim();
+  if(!name){ alert('Informe o nome do motoboy'); return; }
+  try {
+    await addDoc(motoboysCollectionRef, { name, phone, createdAt: Date.now() });
+    document.getElementById('motoboyForm').reset();
+    document.getElementById('motoboyModal').classList.remove('open');
+    await fetchMotoboys();
+    alert('Motoboy cadastrado com sucesso!');
+  } catch (err) {
+    console.error('Erro ao salvar motoboy:', err);
+    alert('Falha ao salvar motoboy.');
+  }
+});
+
+// Atualiza o vínculo motoboy <-> pedido
+window._updateOrderMotoboy = async function(orderId, motoboyId){
+  try {
+    const orderDocRef = doc(db, "orders", orderId);
+    if(!motoboyId){
+      await updateDoc(orderDocRef, { motoboyId: "", motoboyName: "" });
+      return;
+    }
+    const m = motoboys.find(x => x.id === motoboyId);
+    await updateDoc(orderDocRef, { motoboyId: motoboyId, motoboyName: m ? m.name : "" });
+  } catch (e) {
+    console.error('Erro ao vincular motoboy:', e);
+    alert('Falha ao salvar o motoboy no pedido.');
+  }
+};
+
+// Re-renderiza motoboys sempre que pedidos mudam (já que a contagem depende de orders[])
+fetchMotoboys();
+// === END MOTOBOYS ===
+
 
 
 /**
@@ -1441,6 +1595,14 @@ async function updateOrderStatus(orderId, newStatus) {
   try {
     const orderDocRef = doc(db, "orders", orderId);
     await updateDoc(orderDocRef, { status: newStatus });
+    
+    // Lógica para remover do localStorage 'pendingOrders' se o status mudar
+    if (newStatus !== 'pending') {
+        let pendingOrders = JSON.parse(localStorage.getItem('pendingOrders')) || [];
+        pendingOrders = pendingOrders.filter(id => id !== orderId);
+        localStorage.setItem('pendingOrders', JSON.stringify(pendingOrders));
+    }
+    
     // O onSnapshot se encarregará de re-renderizar a lista automaticamente
   } catch (e) {
       console.error("Erro ao atualizar status no Firebase:", e);
@@ -1982,7 +2144,7 @@ function renderItems(){
               <div class="info" style="flex:1;">
                   <h3>
                       <span>${item.name}</span>
-                      <span style="color:var(--primary); font-weight:800">${formatBRL(item.price)}</span>
+                      <span style="color:var(--primary); font-weight:800">${formatBRL(item.totalPrice / item.qty)}</span>
                   </h3>
                   <p>${item.desc}</p>
                   <div class="actions">
@@ -2020,7 +2182,7 @@ function renderItems(){
             <img src="${item.img || blankSVG()}" alt="${item.name}" class="menu-card-img">
             <div class="menu-card-body">
                 <h3 class="menu-card-title">${item.name}</h3>
-                <p class="menu-card-price">${formatBRL(item.price)}</p>
+                <p class="menu-card-price">${formatBRL(item.totalPrice / item.qty)}</p>
                 <button class="btn menu-card-btn" data-id="${item.id}" data-action="add-to-cart">Comprar</button>
             </div>
         `;
@@ -2145,7 +2307,7 @@ function renderCart(){
         mainLine.innerHTML = `
             <div>
                 <strong style="font-size:14px;">${item.name}</strong> 
-                <span class="small" style="color:var(--muted)">(${formatBRL(item.price)} cada)</span>
+                <span class="small" style="color:var(--muted)">(${formatBRL(item.totalPrice / item.qty)} cada)</span>
             </div>
             <div style="font-weight:700;">${formatBRL(item.totalPrice)}</div>
         `;
@@ -2390,7 +2552,7 @@ function renderPDVItems(){
     ((DATA.items || [])).forEach(item => {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid #f5f5f5;';
-        row.innerHTML = `<div><strong>${item.name}</strong><div class="small" style="color:var(--muted)">${formatBRL(item.price)}</div></div>`;
+        row.innerHTML = `<div><strong>${item.name}</strong><div class="small" style="color:var(--muted)">${formatBRL(item.totalPrice / item.qty)}</div></div>`;
         const btns = document.createElement('div');
         btns.style.display = 'flex'; btns.style.gap = '6px'; 
         const addBtn = document.createElement('button');
@@ -2989,86 +3151,249 @@ function showAdminTab(tabId) {
 
 
 
-function renderAdminOrders() {
-  const list = document.getElementById("currentOrdersList");
-  list.innerHTML = '';
-  if (!orders || orders.length === 0) {
-    list.innerHTML = '<div class="small" style="color:var(--muted);">Nenhum pedido recebido ainda.</div>';
+
+
+const ORDER_STATUSES_LIST = [
+  { id: 'pending', label: 'Em Análise', color: '#ff9800' },
+  { id: 'in_production', label: 'Em Produção', color: '#17a2b8' }, // Novo status
+  { id: 'ready_for_delivery', label: 'Pronto para Entregar', color: '#03A9F4' }, // Novo status
+  { id: 'delivered', label: 'Concluído', color: '#4CAF50' }, // Status final
+  { id: 'cancelled', label: 'Cancelar Pedido', color: '#F44336' } // Opção de cancelamento
+];
+
+// Mapeamento de status antigos para novos (para compatibilidade e lógica)
+// 'accepted' será tratado como 'in_production'
+const STATUS_MAP = {
+    'accepted': 'in_production',
+    'preparing': 'in_production', // Mapeia 'preparing' para 'in_production'
+    'ready': 'ready_for_delivery', // Mapeia 'ready' para 'ready_for_delivery'
+    'delivered': 'delivered',
+    'pending': 'pending',
+    'in_production': 'in_production',
+    'ready_for_delivery': 'ready_for_delivery',
+    'cancelled': 'cancelled'
+};
+
+window.openStatusSelector = function(button, orderId) {
+  // Remove qualquer seletor de status aberto
+  document.querySelectorAll('.status-selector').forEach(s => s.remove());
+
+  const selector = document.createElement('div');
+  selector.className = 'status-selector';
+  selector.style.position = 'absolute';
+  selector.style.top = '100%';
+  selector.style.left = '0';
+  selector.style.zIndex = '10';
+  selector.style.background = '#fff';
+  selector.style.border = '1px solid #ccc';
+  selector.style.borderRadius = '5px';
+  selector.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+  selector.style.minWidth = '180px'; // Aumentado para caber os novos labels
+  selector.style.padding = '5px 0';
+
+  // Filtra apenas os status que o usuário pode selecionar (Em Produção, Pronto para Entregar, Concluído, Cancelar)
+  const selectableStatuses = ORDER_STATUSES_LIST.filter(s => s.id !== 'pending');
+
+  selectableStatuses.forEach(status => {
+    const item = document.createElement('div');
+    item.textContent = status.label;
+    item.style.padding = '8px 12px';
+    item.style.cursor = 'pointer';
+    item.style.color = status.color;
+    item.style.fontWeight = 'bold';
+    item.onmouseover = () => item.style.background = '#f0f0f0';
+    item.onmouseout = () => item.style.background = 'none';
+    item.onclick = (e) => {
+      e.stopPropagation();
+      handleStatusUpdate(orderId, status.id);
+      selector.remove();
+    };
+    selector.appendChild(item);
+  });
+
+  button.parentNode.appendChild(selector);
+
+  // Fecha o seletor se clicar fora
+  function closeSelector(e) {
+    if (!selector.contains(e.target) && e.target !== button) {
+      selector.remove();
+      document.removeEventListener('click', closeSelector);
+    }
+  }
+  document.addEventListener('click', closeSelector);
+}
+
+window.openMotoboySelector = function(orderId, currentMotoboyId) {
+  // Remove qualquer seletor de motoboy aberto
+  document.querySelectorAll('.motoboy-selector').forEach(s => s.remove());
+
+  const orderCard = document.querySelector(`.order-card[data-order-id="${orderId}"]`);
+  if (!orderCard) return;
+
+  const selector = document.createElement('div');
+  selector.className = 'motoboy-selector';
+  selector.style.position = 'absolute';
+  selector.style.top = '100%';
+  selector.style.left = '0';
+  selector.style.zIndex = '10';
+  selector.style.background = '#fff';
+  selector.style.border = '1px solid #ccc';
+  selector.style.borderRadius = '5px';
+  selector.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+  selector.style.minWidth = '180px';
+  selector.style.padding = '5px 0';
+
+  // Opção para desvincular
+  const unassignItem = document.createElement('div');
+  unassignItem.textContent = '❌ Desvincular Motoboy';
+  unassignItem.style.padding = '8px 12px';
+  unassignItem.style.cursor = 'pointer';
+  unassignItem.style.color = '#dc3545';
+  unassignItem.onmouseover = () => unassignItem.style.background = '#fbe6e6';
+  unassignItem.onmouseout = () => unassignItem.style.background = 'none';
+  unassignItem.onclick = (e) => {
+    e.stopPropagation();
+    window._updateOrderMotoboy(orderId, null);
+    selector.remove();
+  };
+  selector.appendChild(unassignItem);
+
+  // Lista de motoboys
+  (motoboys || []).forEach(motoboy => {
+    const item = document.createElement('div');
+    const isCurrent = motoboy.id === currentMotoboyId;
+    item.textContent = (isCurrent ? '✅ ' : '') + motoboy.name;
+    item.style.padding = '8px 12px';
+    item.style.cursor = 'pointer';
+    item.style.fontWeight = isCurrent ? 'bold' : 'normal';
+    item.onmouseover = () => item.style.background = '#f0f0f0';
+    item.onmouseout = () => item.style.background = 'none';
+    item.onclick = (e) => {
+      e.stopPropagation();
+      window._updateOrderMotoboy(orderId, motoboy.id);
+      selector.remove();
+    };
+    selector.appendChild(item);
+  });
+
+  // Adiciona o seletor ao botão que foi clicado
+  const button = event.target.closest('button');
+  if (button) {
+    button.parentNode.appendChild(selector);
+  } else {
+    // Fallback: adiciona ao card
+    orderCard.querySelector('.order-btns').appendChild(selector);
+  }
+
+  // Fecha o seletor se clicar fora
+  function closeSelector(e) {
+    if (!selector.contains(e.target) && e.target !== button) {
+      selector.remove();
+      document.removeEventListener('click', closeSelector);
+    }
+  }
+  document.addEventListener('click', closeSelector);
+}
+
+window.handleStatusUpdate = function(orderId, newStatus) {
+  // Encontra o pedido no array global 'orders'
+  const orderIndex = orders.findIndex(o => o.id === orderId);
+  if (orderIndex === -1) {
+    alert('Pedido não encontrado.');
     return;
   }
 
-  orders.forEach(order => {
-    let bgColor = '#fff';
-    if (order.status === 'pending') bgColor = '#fff7e6';
-    else if (order.status === 'preparing') bgColor = '#e6ffed';
-    else if (order.status === 'ready') bgColor = '#e6f0ff';
-    else if (order.status === 'delivered') bgColor = '#f2f2f2';
-    else if (order.status === 'cancelled') bgColor = '#ffe6e6';
+  // 1. Chama a função global para atualizar o status no Firebase
+  window.updateOrderStatus(orderId, newStatus)
+    .then(() => {
+      // 2. Atualiza o status no array local para re-renderização
+      orders[orderIndex].status = newStatus;
+      // 3. Re-renderiza o quadro Kanban para mover o card
+      renderAdminOrders();
+    })
+    .catch(error => {
+      console.error("Erro ao atualizar status:", error);
+      alert("Falha ao atualizar o status do pedido.");
+    });
+}
 
-    const div = document.createElement('div');
-    div.style.cssText = `border:1px solid #ddd; border-radius:8px; padding:12px; margin-bottom:10px; background:${bgColor}; transition:background 0.3s;`;
+function renderAdminOrders(){
+  const colPending = document.getElementById("col_pending");
+  const colInProduction = document.getElementById("col_in_production"); // Novo ID
+  const colReadyForDelivery = document.getElementById("col_ready_for_delivery"); // Novo ID
+  const colDelivered = document.getElementById("col_delivered");
 
-    // Conteúdo principal (sem o botão de impressão inline)
-    div.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <strong style="font-size:16px;">Pedido #${order.id.substring(0, 7)}</strong>
-        <div class="print-button-placeholder"></div>
-      </div>
-      <div class="small" style="color:var(--muted); margin:4px 0;">
-        Cliente: ${order.userName} (${order.userPhone || 'sem telefone'})<br>
-        Endereço: ${order.address || 'N/A'}<br>
-        Área de Entrega: ${order.deliveryAreaName || 'N/A'} (${formatBRL(order.deliveryFee)})
-      </div>
-      <div style="margin:8px 0;">
-        <strong style="color:var(--primary); font-size:18px;">Total: ${formatBRL(order.total)}</strong>
-        <span class="small" style="color:var(--muted); margin-left:10px;">(${order.paymentMethod === 'cash' ? 'Dinheiro' + (order.changeNeeded > 0 ? ' c/ Troco para ' + formatBRL(order.changeNeeded) : '') : order.paymentMethod === 'credit' ? 'Crédito' : 'Débito'})</span>
-      </div>
-      <div style="font-size:14px; margin-bottom:10px;">
-        ${(order.items || []).map(item => `
-          <div style="margin-left:10px; margin-top:4px; border-left:2px solid #eee; padding-left:6px;">
-            ${item.qty}x ${item.name} (${formatBRL(item.totalPrice / item.qty)} cada)
-            ${item.addons && item.addons.length > 0 ? `<div class="small" style="color:var(--muted); margin-left:5px;">+ ${(item.addons || []).map(a => `${a.qty}x ${a.name}`).join(', ')}</div>` : ''}
-          </div>
-        `).join('')}
-      </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-        <div>
-          <label style="font-size:13px; color:var(--muted);">Status:</label>
-          <select class="pill" style="padding:4px 10px;" onchange="updateOrderStatus('${order.id}', this.value)">
-            ${Object.entries(ORDER_STATUSES).map(([key, val]) => `
-              <option value="${key}" ${order.status === key ? 'selected' : ''}>${val.label}</option>
-            `).join('')}
-          </select>
+  colPending.innerHTML = `<div class='kanban-title' style='background:#ff9800'>🟧 Pendentes</div>`;
+  colInProduction.innerHTML = `<div class='kanban-title' style='background:#17a2b8'>🟨 Em Produção</div>`;
+  colReadyForDelivery.innerHTML = `<div class='kanban-title' style='background:#03A9F4'>🟦 Pronto para Entregar</div>`;
+  colDelivered.innerHTML = `<div class='kanban-title' style='background:#4CAF50'>✔️ Concluídos</div>`;
+
+  (orders || []).forEach(order => {
+    // Normaliza o status para os novos IDs, tratando 'accepted' como 'in_production'
+    const normalizedStatus = STATUS_MAP[order.status] || order.status;
+
+    const div=document.createElement("div");
+    div.className="order-card";
+    div.style.cursor="pointer";
+
+    let itemsHTML = (order.items || []).map(item => {
+        let itemStr = `<b>${item.qty}x ${item.name}</b> (${formatBRL(item.totalPrice / item.qty)})`;
+        if (item.addons && item.addons.length > 0) {
+            itemStr += item.addons.map(a => `<br>+ ${a.qty}x ${a.name}`).join('');
+        }
+        return itemStr;
+    }).join('<br>');
+    let paymentDisplay = order.paymentMethod;
+    if (order.paymentMethod === 'Dinheiro' && order.change) {
+        paymentDisplay += ` (Troco: ${formatBRL(order.change)})`;
+    } else if (order.paymentMethod === 'Débito') {
+        paymentDisplay = 'Débito';
+    } else if (order.paymentMethod === 'Crédito') {
+        paymentDisplay = 'Crédito';
+    } else if (order.paymentMethod === 'PIX') {
+        paymentDisplay = 'PIX';
+    }
+    
+    let totalDisplay = formatBRL(order.total);
+
+    let detailsHTML = `
+      <div class='order-details' style='display:none; margin-top:8px;font-size:13px;color:#444;'>
+        <b>Cliente:</b> ${order.userName || "N/A"}<br>
+        <b>Endereço:</b> ${order.address || "N/A"}<br>
+        <b>Área de Entrega:</b> ${order.neighborhood || "N/A"}<br>
+        <b>Total:</b> R$ ${totalDisplay}<br>
+        <hr style="border: 0; border-top: 1px dashed #ccc; margin: 5px 0;">
+        ${itemsHTML}
+        <hr style="border: 0; border-top: 1px dashed #ccc; margin: 5px 0;">
+        <div class='order-btns' style='display:flex; gap: 5px; flex-wrap: wrap; position: relative;'>
+          <!-- Botão 'Atualizar Status' -->
+          <button style='background:#ff9800;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer; position: relative;' onclick='event.stopPropagation(); openStatusSelector(this, "${order.id}")'>Atualizar Status</button>
+          <button style='background:#03a9f4;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer;' onclick='event.stopPropagation(); openMotoboySelector("${order.id}", "${order.motoboyId || ''}")'>Motoboy: ${order.motoboyName || '— Selecionar —'}</button>
+          <button style='background:#4caf50;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer;' onclick='event.stopPropagation(); printOrder("${order.id}")'>🖨️ Imprimir</button>
         </div>
+      </div>`;
+
+    div.innerHTML=`<div class='order-card-header'>
+        <span>Pedido #${order.id.substring(0,7)}</span>
+        <span>R$ ${formatBRL(order.total)}</span>
       </div>
+      ${detailsHTML}
     `;
 
-    // Criar botão de impressão via DOM e adicionar listener (sem depender do escopo global imediato)
-    const btn = document.createElement('button');
-    btn.className = 'pill';
-    btn.style.cssText = 'background:#17a2b8; color:white; padding:4px 10px; font-size:13px;';
-    btn.textContent = '🖨️ Imprimir';
-    btn.addEventListener('click', () => {
-      if (typeof window.printOrder === 'function') {
-        window.printOrder(order.id);
-      } else if (typeof printOrder === 'function') {
-        printOrder(order.id);
-      } else {
-        alert('Função de impressão não encontrada.');
-      }
+    div.addEventListener("click",()=>{
+        let box=div.querySelector(".order-details");
+        box.style.display= box.style.display==="none" ? "block" : "none";
     });
 
-    // Insere o botão no placeholder
-    // Usamos querySelector na div recém criada (não no DOM global ainda)
-    const temp = document.createElement('div');
-    temp.appendChild(div);
-    const placeholder = temp.querySelector('.print-button-placeholder');
-    if (placeholder) placeholder.replaceWith(btn);
-
-    // Agora anexa à lista
-    list.appendChild(temp.firstChild);
+    if(normalizedStatus==="pending") colPending.appendChild(div);
+    else if(normalizedStatus==="in_production" || order.status==="accepted") colInProduction.appendChild(div);
+    else if(normalizedStatus==="ready_for_delivery") colReadyForDelivery.appendChild(div);
+    else if(normalizedStatus==="delivered") colDelivered.appendChild(div);
+    // Pedidos cancelados não são exibidos no Kanban
   });
 }
+
+
 
 
 window.filterOrdersByPeriod = function(orders, period) {
@@ -3989,7 +4314,7 @@ function openPDVOrderModal(tableId, existingOrderId = null){
         const btn = document.createElement('button');
         btn.className = 'pill';
         btn.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:6px;';
-        btn.textContent = `${item.name} — ${formatBRL(item.price)}`;
+        btn.textContent = `${item.name} — ${formatBRL(item.totalPrice / item.qty)}`;
         btn.addEventListener('click', () => {
             // No modo PDV, ao clicar no item, abre o modal de adicionais
             // O modal de adicionais precisa saber que está no modo PDV
@@ -4580,7 +4905,7 @@ window.printOrder = function(orderId) {
 
   // Geração da lista de itens
   const itemsList = (order.items || []).map(item => {
-    let itemHtml = `<div class="footer-line"><span>${item.qty}x ${item.name}</span><span>${formatBRL(item.price)}</span></div>`;
+    let itemHtml = `<div class="footer-line"><span>${item.qty}x ${item.name}</span><span>${formatBRL(item.totalPrice / item.qty)}</span></div>`;
     if (item.addons && item.addons.length > 0) {
       item.addons.forEach(a => {
         itemHtml += `<div class="item-addon"> &nbsp; &nbsp; + ${a.qty}x ${a.name}</div>`;
@@ -5116,6 +5441,14 @@ safeInit();
 
 
 
+
+document.getElementById("tabMotoboys")?.addEventListener("click", () => {
+  document.querySelectorAll(".admin-panel").forEach(p => p.classList.add("hidden"));
+  document.getElementById("motoboysPanel")?.classList.remove("hidden");
+  document.querySelectorAll(".admin-tabs button").forEach(b => b.classList.remove("active"));
+  document.getElementById("tabMotoboys")?.classList.add("active");
+  renderMotoboys();
+});
 document.getElementById("tabCustomers").addEventListener("click", () => {
   document.querySelectorAll(".admin-panel").forEach(p => p.classList.add("hidden"));
   document.getElementById("customersPanel").classList.remove("hidden");
