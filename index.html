@@ -87,6 +87,34 @@ window.printOrder = function(orderId) {
     }
     return itemHtml;
   }).join('');
+  
+  // Geração da lista de comandas avulsas
+  let comandasAvulsasHtml = '';
+  let totalComandas = 0;
+  if (order.comandasAvulsas && order.comandasAvulsas.length > 0) {
+    comandasAvulsasHtml = '<div class="line"></div><div class="bold">Comandas Avulsas:</div>';
+    order.comandasAvulsas.forEach(comanda => {
+      totalComandas += comanda.totalCalculado || 0;
+      let detalhes = '';
+      if (comanda.tipo === 'valor') {
+        detalhes = `Valor Fixo`;
+      } else if (comanda.tipo === 'peso') {
+        detalhes = `${comanda.peso}kg x ${formatBRL(comanda.valorKg)}/kg`;
+      }
+      const pagamentoLabel = {
+        'pix': 'PIX',
+        'credit': 'Crédito',
+        'debit': 'Débito',
+        'cash': 'Dinheiro'
+      }[comanda.pagamento] || comanda.pagamento;
+      
+      comandasAvulsasHtml += `<div class="footer-line"><span>${comanda.cliente} (${detalhes})</span><span>${formatBRL(comanda.totalCalculado)}</span></div>`;
+      comandasAvulsasHtml += `<div class="item-addon">Pagamento: ${pagamentoLabel}${comanda.cpf ? ' | CPF: ' + comanda.cpf : ''}</div>`;
+    });
+  }
+  
+  // Total geral incluindo comandas
+  const totalGeral = (order.totalGeral !== undefined) ? order.totalGeral : (total + totalComandas);
 
   const printContent = `
     <html>
@@ -116,6 +144,7 @@ window.printOrder = function(orderId) {
 <div class="line"></div>
 <div class="bold">Itens:</div>
 <div class="items-list">${itemsList}</div>
+${comandasAvulsasHtml}
 <div class="line"></div>
 <div class="bold">Cliente</div>
 
@@ -132,9 +161,30 @@ Forma de Pagamento: ${paymentMethod}
 <div class="line"></div>
 <div class="footer-line"><span>Subtotal:</span><span>${formatBRL(subtotal)}</span></div>
 <div class="footer-line"><span>Taxa de entrega:</span><span>${formatBRL(deliveryFee)}</span></div>
-<div class="footer-line"><span>Total:</span><span>${formatBRL(total)}</span></div>
+${totalComandas > 0 ? `<div class="footer-line"><span>Comandas Avulsas:</span><span>${formatBRL(totalComandas)}</span></div>` : ''}
+<div class="footer-line"><span>Total:</span><span>${formatBRL(totalGeral)}</span></div>
 <div class="line"></div>
-      </body>
+      
+<!-- ========================================================================= -->
+<!-- === MODAL DE HISTÓRICO DE PEDIDOS (CRM) === -->
+<!-- ========================================================================= -->
+<div id="orderHistoryModal" class="modal">
+  <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
+    <div class="modal-header">
+      <h2 id="historyModalTitle">Histórico de Pedidos</h2>
+      <span class="close-button" onclick="closeOrderHistoryModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <p id="historyClientInfo" style="margin-bottom: 15px; font-weight: 600;"></p>
+      <div id="historyOrdersList">
+        <!-- Pedidos serão injetados aqui -->
+        <p style="color:#888;">Carregando histórico...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
     </html>
   `;
 
@@ -173,6 +223,34 @@ Forma de Pagamento: ${paymentMethod}
   .grid{display:grid;grid-template-columns:1fr 360px;gap:14px}
   
   /* --- INÍCIO: AJUSTES DE RESPONSIVIDADE (MOBILE) --- */
+
+  /* Estilos para o novo Dashboard de Motoboys */
+  .motoboy-dashboard-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+  }
+  .dashboard-card {
+    flex: 1;
+    min-width: 150px;
+    background: var(--card);
+    padding: 15px;
+    border-radius: var(--radius);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    text-align: center;
+  }
+  .dashboard-card .value {
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--primary);
+    margin-bottom: 5px;
+  }
+  .dashboard-card .label {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
   
   /* Esconde o user-badge que está no footer em telas grandes (desktop) */
   .user-badge.only-mobile {
@@ -274,6 +352,47 @@ Forma de Pagamento: ${paymentMethod}
   .addon-group{border:1px solid #f1f1f1;padding:12px;border-radius:8px;margin-bottom:12px}
   .addon-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .addon-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid #fbfbfb}
+  
+  /* === ESTILOS PARA TIMELINE DO PEDIDO === */
+  #timelineList li {
+    position: relative;
+    padding-left: 35px;
+    padding-bottom: 20px;
+    border-left: 2px solid #e0e0e0;
+  }
+  #timelineList li:last-child {
+    border-left: 2px solid transparent;
+    padding-bottom: 0;
+  }
+  #timelineList li::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ccc;
+  }
+  #timelineList li.completed::before {
+    background: #4CAF50;
+  }
+  #timelineList li.current::before {
+    background: var(--primary);
+    width: 14px;
+    height: 14px;
+    left: -8px;
+    box-shadow: 0 0 0 4px rgba(128, 0, 128, 0.2);
+  }
+  #timelineList li .timeline-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+  #timelineList li .timeline-time {
+    font-size: 12px;
+    color: var(--muted);
+  }
   .addon-controls{display:flex;gap:8px;align-items:center}
   .addon-controls button{background:#fff;border:1px solid #eee;border-radius:6px;padding:6px 10px;cursor:pointer}
   .addon-controls .count{min-width:28px;text-align:center;display:inline-block}
@@ -537,9 +656,30 @@ Forma de Pagamento: ${paymentMethod}
   <button>Sucos Naturais</button>
 </div>
         <div id="items" class="items"></div>
+      </main>
+        <div class="cart-panel" id="cartPanel">
+          <h3>Meu Carrinho</h3>
+          <div id="cartList"></div>
+          <div class="cart-summary">
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span id="subtotal">R$ 0,00</span>
+            </div>
+            <div class="summary-row">
+              <span>Taxa de Entrega</span>
+              <span id="deliveryFee">R$ 0,00</span>
+            </div>
+            <div class="summary-row total">
+              <span>Total</span>
+              <span id="total">R$ 0,00</span>
+            </div>
+          </div>
+          <button class="btn" id="btnCheckout" disabled>Finalizar Pedido</button>
+        </div>
+      </aside>
 
         <div class="modal" id="adminModal">
-          <div class="card" role="dialog" aria-modal="true" style="max-width:1000px">
+          <div class="card" role="dialog" aria-modal="true" style="max-width:2000px">
             <h3>Painel de Administração</h3>
             <div class="admin-tabs">
               <button id="tabOrders" class="active">Pedidos em Tempo Real</button>
@@ -610,8 +750,16 @@ Forma de Pagamento: ${paymentMethod}
     <div style="margin-left:auto;font-size:13px;color:var(--muted)">Apenas pedidos com status <strong>entregue</strong> são considerados.</div>
   </div>
 
-  <!-- Cards Resumo -->
-  <div id="salesSummaryCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
+	  <!-- Gráfico de Picos de Horário -->
+	  <div class="side" style="padding:12px; margin-bottom: 14px;">
+	    <h5 style="margin:0 0 8px">📈 Picos de Pedidos por Hora</h5>
+	    <div style="height: 300px;">
+	      <canvas id="peakHoursChart"></canvas>
+	    </div>
+	  </div>
+	
+	  <!-- Cards Resumo -->
+	  <div id="salesSummaryCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
     <div class="side" style="padding:12px;text-align:left">
       <div style="font-size:13px;color:var(--muted)">Faturamento Total</div>
       <div id="cardRevenue" style="font-weight:800;font-size:20px;margin-top:6px">R$ 0,00</div>
@@ -645,17 +793,37 @@ Forma de Pagamento: ${paymentMethod}
           </thead>
           <tbody></tbody>
         </table>
-      </div>
-    </div>
-
-    <div class="side" style="padding:12px">
-      <h5 style="margin:0 0 8px">Formas de Pagamento</h5>
+	      </div>
+	    </div>
+	
+	    <!-- NOVO: Tabela Top Clientes -->
+	    <div class="side" style="padding:12px">
+	      <h5 style="margin:0 0 8px">🏆 Top Clientes</h5>
+	      <div style="overflow:auto">
+	        <table id="tableTopCustomers" style="width:100%;border-collapse:collapse">
+	          <thead>
+	            <tr style="text-align:left;color:var(--muted);font-size:13px">
+	              <th style="padding:8px;border-bottom:1px solid #eee">#</th>
+	              <th style="padding:8px;border-bottom:1px solid #eee">Nome</th>
+	              <th style="padding:8px;border-bottom:1px solid #eee">Pedidos</th>
+	              <th style="padding:8px;border-bottom:1px solid #eee">Total Gasto</th>
+	              <th style="padding:8px;border-bottom:1px solid #eee">Ticket Médio</th>
+	            </tr>
+	          </thead>
+	          <tbody></tbody>
+	        </table>
+	      </div>
+	    </div>
+	
+	    <div class="side" style="padding:12px">
+	      <h5 style="margin:0 0 8px">Formas de Pagamento</h5>
       <div style="overflow:auto">
         <table id="tablePayments" style="width:100%;border-collapse:collapse">
           <thead>
             <tr style="text-align:left;color:var(--muted);font-size:13px">
               <th style="padding:8px;border-bottom:1px solid #eee">Método</th>
               <th style="padding:8px;border-bottom:1px solid #eee">Quantidade</th>
+              <th style="padding:8px;border-bottom:1px solid #eee">Total (R$)</th>
               <th style="padding:8px;border-bottom:1px solid #eee">%</th>
             </tr>
           </thead>
@@ -664,8 +832,26 @@ Forma de Pagamento: ${paymentMethod}
       </div>
     </div>
 
-    <div class="side" style="padding:12px">
-      <h5 style="margin:0 0 8px">Performance por Área de Entrega</h5>
+    <!-- NOVO: Tabela Relatório de Motoboys -->
+	    <div class="side" style="padding:12px">
+	      <h5 style="margin:0 0 8px">🛵 Relatório de Motoboys</h5>
+	      <div style="overflow:auto">
+	        <table id="tableMotoboyReport" style="width:100%;border-collapse:collapse">
+	          <thead>
+	            <tr style="text-align:left;color:var(--muted);font-size:13px">
+	              <th style="padding:8px;border-bottom:1px solid #eee">Motoboy</th>
+	              <th style="padding:8px;border-bottom:1px solid #eee">Entregas</th>
+	              <th style="padding:8px;border-bottom:1px solid #eee">Total Entregue (R$)</th>
+	              <th style="padding:8px;border-bottom:1px solid #eee">Média por Entrega (R$)</th>
+	            </tr>
+	          </thead>
+	          <tbody></tbody>
+	        </table>
+	      </div>
+	    </div>
+	
+	    <div class="side" style="padding:12px">
+	      <h5 style="margin:0 0 8px">Performance por Área de Entrega</h5>
       <div style="overflow:auto">
         <table id="tableAreas" style="width:100%;border-collapse:collapse">
           <thead>
@@ -682,8 +868,28 @@ Forma de Pagamento: ${paymentMethod}
   </div>
 </div>
 <div id="customersPanel" class="admin-panel hidden">
-                <h4>Controle de Clientes</h4>
-                <div id="customersList"></div>
+<h4>Controle de Clientes</h4>
+	                
+	                <!-- Controles de Busca e Ordenação (CRM) -->
+	                <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+	                    <input type="text" id="customerSearchInput" placeholder="Buscar por nome ou telefone..." 
+	                           style="flex:1; padding:8px; border:1px solid #ccc; border-radius:8px;"
+	                           oninput="filterAndSortCustomers()">
+	                    
+	                    <select id="customerSortSelect" 
+	                            style="padding:8px; border:1px solid #ccc; border-radius:8px;"
+	                            onchange="filterAndSortCustomers()">
+	                        <option value="totalOrdersDesc">Pedidos (Mais)</option>
+	                        <option value="totalOrdersAsc">Pedidos (Menos)</option>
+	                        <option value="totalSpentDesc">Gasto (Maior)</option>
+	                        <option value="totalSpentAsc">Gasto (Menor)</option>
+	                        <option value="lastOrderDateDesc">Mais Recentes</option>
+	                        <option value="lastOrderDateAsc">Mais Antigos</option>
+	                        <option value="activityScoreDesc">Mais Ativos</option>
+	                    </select>
+	                </div>
+	                
+	                <div id="customersList"></div>
               </div>
               <div id="settingsPanel" class="admin-panel hidden">
                 <h4>Configurações da Loja</h4>
@@ -709,15 +915,47 @@ Forma de Pagamento: ${paymentMethod}
                     <input type="text" id="restaurantStatus" placeholder="Ex: Aberto até as 23:00" required>
                   </div>
                   
+                  <!-- NOVO: Tempo de Preparo Dinâmico -->
+                  <div class="form-group">
+                    <label for="preparationTime">⏱️ Tempo Médio de Preparo (minutos)</label>
+                    <input type="number" id="preparationTime" min="5" max="120" placeholder="Ex: 30" required>
+                    <small style="color: var(--muted); font-size: 12px;">Tempo estimado para preparar os pedidos (entre 5 e 120 minutos)</small>
+                  </div>
+                  
                   <div class="form-group">
                     <label for="restaurantLogoFile">Logo da Loja (Escolha Arquivo)</label>
                     <input type="file" id="restaurantLogoFile" accept="image/*">
                     <div style="margin-top:10px;"><img id="currentLogoPreview" src="" alt="Prévia do Logo" style="max-width:100px; height:auto; border-radius:8px;"></div>
                     <input type="hidden" id="restaurantLogoUrl"> </div>
                   <h5 style="margin-top:20px;">Taxas de Entrega por Área</h5>
+                  
+                  <div class="form-group">
+                    <label>
+                      <input type="checkbox" id="useRadiusDelivery"> Calcular taxa automaticamente por raio (km)
+                    </label>
+                  </div>
+                  
+                  <div class="form-group">
+                    <label for="deliveryBaseFee">Taxa base de entrega (R$)</label>
+                    <input type="number" id="deliveryBaseFee" step="0.01" min="0" value="0">
+                  </div>
+                  
+                  <div class="form-group">
+                    <label for="deliveryFeePerKm">Valor por km adicional (R$/km)</label>
+                    <input type="number" id="deliveryFeePerKm" step="0.01" min="0" value="0">
+                  </div>
+                  
+                  <input type="hidden" id="restaurantLat" value="0">
+                  <input type="hidden" id="restaurantLng" value="0">
+                  
                   <div id="deliveryAreasList">
                     </div>
                   <button type="button" class="pill" id="btnAddDeliveryArea" style="background:#e6ffe6; color:#28a745; margin-bottom:10px;">+ Adicionar Área de Entrega</button>
+                  
+                  <h5 style="margin-top:20px;">Gerenciar Cupons de Desconto</h5>
+                  <div id="couponsList" style="margin-bottom:10px;">
+                    </div>
+                  <button type="button" class="pill" id="btnAddCoupon" style="background:#e6ffe6; color:#28a745; margin-bottom:10px;">+ Criar Novo Cupom</button>
                   <div style="text-align:right;margin-top:16px">
                     <button type="submit" class="btn">Salvar Configurações</button>
                   </div>
@@ -725,6 +963,10 @@ Forma de Pagamento: ${paymentMethod}
               </div>
               
               <div id="motoboysPanel" class="admin-panel hidden">
+    <!-- Novo Dashboard de Motoboys -->
+    <div class="motoboy-dashboard-container" id="motoboyDashboard">
+      <!-- Cards do dashboard serão injetados aqui pelo JS -->
+    </div>
                 <h4>Painel de Motoboys</h4>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                   <div style="font-weight:700;">Motoboys Cadastrados</div>
@@ -745,19 +987,6 @@ Forma de Pagamento: ${paymentMethod}
 
       </main>
 
-      <aside class="side cart-panel" id="cartPanel">
-        <h4>Carrinho</h4>
-        <div id="cartList"></div>
-        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div class="small">Subtotal</div>
-            <div id="subtotal" style="font-weight:800">R$ 0,00</div>
-          </div>
-          <div>
-            <button id="btnCheckout" class="btn">Finalizar</button>
-          </div>
-        </div>
-      </aside>
     </div>
 
     <div class="modal" id="itemDetailsModal">
@@ -911,6 +1140,39 @@ Forma de Pagamento: ${paymentMethod}
           <div class="small" id="profileEmail"></div>
           <div class="small" id="profilePhone"></div>
 
+          <!-- Card de Status do Cliente -->
+          <div id="clientStatusCard" style="
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            background: #fff;
+            border: 1px solid #eee;
+            text-align: center;
+          ">
+            <div style="font-size: 12px; color: var(--muted);">Seu Status Atual</div>
+            <div id="clientStatusText" style="font-weight: 700; font-size: 16px; color: var(--primary); margin-top: 5px;">
+              Carregando...
+            </div>
+          </div>
+          <!-- Fim Card de Status do Cliente -->
+          
+          <!-- Badge de Tempo Médio de Entrega -->
+          <div id="averageDeliveryTimeCard" style="
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            background: #fff;
+            border: 1px solid #eee;
+            text-align: center;
+            display: none; /* Escondido por padrão, só aparece se houver dados */
+          ">
+            <div style="font-size: 12px; color: var(--muted);">🛵 Tempo médio de entrega</div>
+            <div id="averageDeliveryTimeText" style="font-weight: 700; font-size: 16px; color: #03A9F4; margin-top: 5px;">
+              --min
+            </div>
+          </div>
+          <!-- Fim Badge de Tempo Médio de Entrega -->
+
           <h4 style="margin-top:20px;">Meus Endereços Salvos</h4>
           <div id="savedUserAddressesList">
             </div>
@@ -922,6 +1184,54 @@ Forma de Pagamento: ${paymentMethod}
 
           <hr/>
         </div>
+        
+        <!-- Painel Meu Consumo -->
+        <h4 style="margin-top:20px;">📊 Meu Consumo</h4>
+        <div id="myConsumptionPanel" style="
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          gap: 10px;
+          margin-bottom: 20px;
+        ">
+          <!-- Cards de métricas serão injetados aqui -->
+          <div class="side" style="padding:10px; text-align:center;">
+            <div style="font-size:12px;color:var(--muted)">Total Gasto</div>
+            <div id="totalSpent" style="font-weight:800;font-size:16px;margin-top:4px">R$ 0,00</div>
+          </div>
+          <div class="side" style="padding:10px; text-align:center;">
+            <div style="font-size:12px;color:var(--muted)">Ticket Médio</div>
+            <div id="averageTicket" style="font-weight:800;font-size:16px;margin-top:4px">R$ 0,00</div>
+          </div>
+          <div class="side" style="padding:10px; text-align:center;">
+            <div style="font-size:12px;color:var(--muted)">Pedidos</div>
+            <div id="totalOrders" style="font-weight:800;font-size:16px;margin-top:4px">0</div>
+          </div>
+          <div class="side" style="padding:10px; text-align:center; grid-column: 1 / -1;">
+            <div style="font-size:12px;color:var(--muted)">Produto Mais Pedido</div>
+            <div id="mostOrderedProduct" style="font-weight:800;font-size:16px;margin-top:4px">N/A</div>
+          </div>
+          <div class="side" style="padding:10px; text-align:center; grid-column: 1 / -1;">
+            <div style="font-size:12px;color:var(--muted)">Pagamento Preferido</div>
+            <div id="preferredPaymentMethod" style="font-weight:800;font-size:16px;margin-top:4px">N/A</div>
+          </div>
+        </div>
+        <!-- Fim Painel Meu Consumo -->
+
+        <!-- Favoritos do Cliente -->
+        <h4 style="margin-top:20px;">❤️ Meus Favoritos</h4>
+        <div id="favoriteProductsList" style="margin-bottom: 20px;">
+          <!-- Produtos favoritos serão injetados aqui -->
+          <div class="small" style="color:var(--muted)">Nenhum favorito ainda. Faça mais pedidos!</div>
+        </div>
+        <!-- Fim Favoritos do Cliente -->
+        
+        <!-- Cupons Disponíveis -->
+        <h4 style="margin-top:20px;">🎁 Seus Cupons Disponíveis</h4>
+        <div id="availableCouponsList" style="margin-bottom: 20px;">
+          <!-- Cupons serão injetados aqui -->
+          <div class="small" style="color:var(--muted)">Nenhum cupom disponível no momento.</div>
+        </div>
+        <!-- Fim Cupons Disponíveis -->
         
         <h4>Meus Pedidos</h4>
         <div id="profileOrders"></div>
@@ -980,6 +1290,54 @@ Forma de Pagamento: ${paymentMethod}
         <button type="submit" class="btn">Salvar Motoboy</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Modal Perfil do Motoboy -->
+<div class="modal" id="motoboyProfileModal">
+  <div class="card" role="dialog" aria-modal="true" style="max-width:700px;max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h3 id="motoboyProfileName" style="margin:0;">Perfil do Motoboy</h3>
+      <button type="button" class="pill" onclick="closeMotoboyProfile()" style="font-size:20px;padding:4px 10px;">&times;</button>
+    </div>
+    
+    <!-- Estatísticas Principais -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;">
+      <div class="dashboard-card">
+        <div class="value" id="profileTotalEntregas">0</div>
+        <div class="label">Entregas Totais</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="value" id="profileMediaEntrega">R$ 0,00</div>
+        <div class="label">Média por Entrega</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="value" id="profileTempoMedio">0 min</div>
+        <div class="label">Tempo Médio</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="value" id="profileEntregasHoje">0</div>
+        <div class="label">Entregues Hoje</div>
+      </div>
+    </div>
+
+    <!-- Gráfico de Entregas por Período -->
+    <div style="background:#f9f9f9;padding:15px;border-radius:10px;margin-bottom:20px;">
+      <h4 style="margin:0 0 15px 0;font-size:14px;color:var(--muted);">ENTREGAS POR PERÍODO (Últimos 7 dias)</h4>
+      <canvas id="motoboyDeliveriesChart" style="max-height:200px;"></canvas>
+    </div>
+
+    <!-- Áreas de Entrega -->
+    <div style="background:#f9f9f9;padding:15px;border-radius:10px;">
+      <h4 style="margin:0 0 15px 0;font-size:14px;color:var(--muted);">ÁREAS QUE MAIS ENTREGA</h4>
+      <div id="profileTopAreas" style="display:flex;flex-direction:column;gap:8px;">
+        <!-- Áreas serão injetadas aqui -->
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+      <button type="button" class="btn" onclick="closeMotoboyProfile()">Fechar</button>
+    </div>
   </div>
 </div>
 
@@ -1143,9 +1501,23 @@ Forma de Pagamento: ${paymentMethod}
 
               <h4>Resumo do Pedido</h4>
               <div id="checkoutCartSummary"></div>
+              
+              <div class="form-group" style="margin-top:12px;">
+                <label for="checkoutCoupon">Cupom de Desconto</label>
+                <div style="display:flex;gap:8px;">
+                  <input type="text" id="checkoutCoupon" placeholder="Digite o código do cupom" style="flex:1;text-transform:uppercase;">
+                  <button type="button" id="applyCouponBtn" class="pill" style="background:#28a745;color:#fff;">Aplicar</button>
+                </div>
+                <div id="couponMessage" style="font-size:12px;margin-top:4px;"></div>
+              </div>
+              
               <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;border-top:1px solid #eee;padding-top:8px;margin-top:8px;">
                 <span>Subtotal:</span>
                 <span id="checkoutSubtotal">R$ 0,00</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;" id="checkoutDiscountRow" data-visible="false">
+                <span>Desconto (<span id="checkoutCouponCode"></span>):</span>
+                <span id="checkoutDiscount" style="color:#28a745;">- R$ 0,00</span>
               </div>
               <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px;">
                 <span>Taxa de Entrega (<span id="checkoutAreaName">N/A</span>):</span>
@@ -1186,6 +1558,70 @@ Forma de Pagamento: ${paymentMethod}
       </div>
     </div>
 
+    <!-- ========================================================================= -->
+    <!-- === MODAL DE LINHA DO TEMPO DO PEDIDO === -->
+    <!-- ========================================================================= -->
+    <div class="modal" id="orderTimelineModal">
+      <div class="modal-content" style="max-width: 500px; max-height: 80vh; overflow-y: auto;">
+        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h2 id="timelineModalTitle" style="margin: 0;">📜 Histórico do Pedido</h2>
+          <span class="close-button" onclick="closeOrderTimelineModal()" style="cursor: pointer; font-size: 24px; color: #999;">&times;</span>
+        </div>
+        <div class="modal-body">
+          <p id="timelineOrderInfo" style="margin-bottom: 15px; font-weight: 600; color: var(--primary);"></p>
+          <ul id="timelineList" style="list-style: none; padding: 0; margin: 0;">
+            <!-- Timeline será injetada aqui -->
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="couponModal">
+      <div class="card" role="dialog" aria-modal="true" style="max-width:500px">
+        <h3 id="couponModalTitle">Criar Novo Cupom</h3>
+        <form id="couponForm">
+          <input type="hidden" id="couponIdEdit" />
+          <div class="form-group">
+            <label for="couponCode">Código do Cupom</label>
+            <input type="text" id="couponCode" placeholder="Ex: DESCONTO10" required style="text-transform:uppercase;">
+          </div>
+          <div class="form-group">
+            <label for="couponType">Tipo de Desconto</label>
+            <select id="couponType" required>
+              <option value="percent">Percentual (%)</option>
+              <option value="fixed">Valor Fixo (R$)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="couponValue">Valor</label>
+            <input type="number" id="couponValue" step="0.01" min="0" placeholder="Ex: 10" required>
+          </div>
+          <div class="form-group">
+            <label for="couponMinSubtotal">Valor Mínimo do Pedido (R$)</label>
+            <input type="number" id="couponMinSubtotal" step="0.01" min="0" placeholder="Ex: 30.00" required>
+          </div>
+          <div class="form-group">
+            <label for="couponExpiresAt">Data de Expiração</label>
+            <input type="date" id="couponExpiresAt" required>
+          </div>
+          <div class="form-group">
+            <label for="couponMaxUses">Limite Total de Usos</label>
+            <input type="number" id="couponMaxUses" min="1" placeholder="Ex: 100" required>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;">
+              <input type="checkbox" id="couponActive">
+              <span>Cupom Ativo</span>
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+            <button type="button" id="couponCancel" class="pill">Cancelar</button>
+            <button type="submit" class="btn" id="couponSubmit">Salvar Cupom</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div class="footer-fixed">
       <div class="footer-content-wrapper" style="justify-content: space-around;">
         <div class="user-badge only-mobile" id="userBadge">
@@ -1209,8 +1645,9 @@ async function renderCustomers() {
   container.innerHTML = `<p style="color:#888;">Carregando clientes...</p>`;
 
   try {
+    let orders = [];
     const snapshot = await getDocs(ordersCollectionRef);
-    const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     if (orders.length === 0) {
       container.innerHTML = `<p style="color:#777;">Nenhum cliente com pedidos encontrados.</p>`;
@@ -1231,53 +1668,454 @@ async function renderCustomers() {
           phone: o.userPhone || "",
           address: o.address || "Endereço não informado",
           totalOrders: 1,
+          totalSpent: o.total || 0,
+          lastOrderDate: new Date(o.createdAt).getTime(),
+          firstOrderDate: new Date(o.createdAt).getTime(), // Novo campo para o primeiro pedido
         };
       } else {
         clientsMap[o.userId].totalOrders++;
+        clientsMap[o.userId].totalSpent += o.total || 0;
+        const currentOrderDate = new Date(o.createdAt).getTime();
+        if (currentOrderDate > clientsMap[o.userId].lastOrderDate) {
+            clientsMap[o.userId].lastOrderDate = currentOrderDate;
+        }
+        if (currentOrderDate < clientsMap[o.userId].firstOrderDate) {
+            clientsMap[o.userId].firstOrderDate = currentOrderDate;
+        }
       }
     }
 
-    const clients = Object.values(clientsMap);
+    // Adiciona o activityScore (ex: totalOrders * 1000 + (lastOrderDate / 100000000000))
+	    // Isso prioriza pedidos e usa a data como desempate.
+	    Object.values(clientsMap).forEach(client => {
+	        const daysSinceLastOrder = (Date.now() - client.lastOrderDate) / (1000 * 60 * 60 * 24);
+	        // Uma pontuação simples: mais pedidos e menos dias desde o último pedido = mais ativo
+	        client.activityScore = client.totalOrders / (daysSinceLastOrder + 1);
+	        
+	        // === Cálculo do Indicador de Frequência ===
+	        const daysBetweenOrders = (client.lastOrderDate - client.firstOrderDate) / (1000 * 60 * 60 * 24);
+	        client.frequency = daysBetweenOrders / client.totalOrders; // Média de dias entre pedidos
+	    });
+	    
+	    // === Detecção de Possíveis Duplicados (Simples) ===
+	    const clientsArray = Object.values(clientsMap);
+	    clientsArray.forEach(clientA => {
+	        clientA.isPossibleDuplicate = false;
+	        const phoneA = clientA.phone.replace(/\D/g, '');
+	        const nameA = clientA.name.toLowerCase().trim();
+	        
+	        for (const clientB of clientsArray) {
+	            if (clientA.id === clientB.id) continue;
+	            
+	            const phoneB = clientB.phone.replace(/\D/g, '');
+	            const nameB = clientB.name.toLowerCase().trim();
+	            
+	            // Comparação de telefone: se o telefone for o mesmo, mas o ID for diferente (o que não deveria acontecer, mas pode indicar um erro de dados)
+	            // Ou se o telefone for parecido (ex: um com 9 dígitos e outro com 10, mas o final é o mesmo)
+	            const isPhoneMatch = phoneA === phoneB || (phoneA.length > 5 && phoneB.length > 5 && (phoneA.includes(phoneB) || phoneB.includes(phoneA)));
+	            
+	            // Comparação de nome: se os nomes forem muito parecidos (ex: usando uma métrica simples de substring ou distância)
+	            // Aqui, vamos usar uma comparação simples de que um nome é substring do outro (ex: "João Silva" e "João")
+	            const isNameSimilar = nameA.includes(nameB) || nameB.includes(nameA);
+	            
+	            if (isPhoneMatch && isNameSimilar) {
+	                clientA.isPossibleDuplicate = true;
+	                break;
+	            }
+	        }
+	    });
 
-    if (clients.length === 0) {
-      container.innerHTML = `<p style="color:#777;">Nenhum cliente cadastrado encontrado.</p>`;
-      return;
-    }
-
-    container.innerHTML = clients.map(u => `
-      <div style="
-        background:#fff;
-        padding:14px 16px;
-        border-radius:12px;
-        margin-bottom:10px;
-        box-shadow:0 3px 10px rgba(0,0,0,0.05);
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        flex-wrap:wrap;
-      ">
-        <div style="flex:1;min-width:250px;">
-          <strong style="font-size:16px;color:#333;">${u.name}</strong><br>
-          <small style="color:#555;">📞 ${u.phone}</small><br>
-          <small style="color:#555;">🏠 ${u.address}</small><br>
-          ${u.email ? `<small style="color:#555;">📧 ${u.email}</small><br>` : ""}
-          <small style="color:#777;">🧾 Pedidos: ${u.totalOrders}</small>
-        </div>
-        ${u.phone ? `
-        <a href="https://wa.me/${u.phone.replace(/\D/g,'')}" target="_blank"
-           style="background:#25D366;color:white;padding:8px 12px;border-radius:10px;
-                  text-decoration:none;font-weight:600;display:flex;align-items:center;gap:6px;">
-           💬 WhatsApp
-        </a>` : ''}
-      </div>
-    `).join("");
-
+    // Variável global para armazenar a lista de clientes para filtragem/ordenação
+    window.allCustomers = Object.values(clientsMap);
+    
+    // Chama a função de filtro e ordenação inicial
+    filterAndSortCustomers();
+    
+    return; // A renderização será feita por filterAndSortCustomers()
+    
   } catch (err) {
     console.error("Erro ao carregar clientes:", err);
     container.innerHTML = `<p style="color:red;">Erro ao carregar clientes do Firebase.</p>`;
   }
 }
 window.renderCustomers = renderCustomers;
+
+// =========================================================================
+// === FUNÇÕES DE FILTRO E ORDENAÇÃO DE CLIENTES (CRM) ===
+// =========================================================================
+
+// Variável global para armazenar a lista de clientes (populada em renderCustomers)
+// window.allCustomers
+
+// Função auxiliar para gerar tags automáticas (VIP, Fiel, Inativo)
+// Função auxiliar para formatar a frequência de pedidos
+function formatFrequency(frequencyDays) {
+    if (frequencyDays === 0) return '1 pedido/dia (Novo)';
+    if (frequencyDays <= 7) return `${(7 / frequencyDays).toFixed(1)} pedidos/semana`;
+    if (frequencyDays <= 30) return `${(30 / frequencyDays).toFixed(1)} pedidos/mês`;
+    if (frequencyDays > 30 && frequencyDays <= 90) return 'Cliente Recorrente';
+    return 'Cliente Esporádico';
+}
+
+function generateCustomerTags(client) {
+    const tags = [];
+    const daysInactivity = 60;
+    const msInDay = 1000 * 60 * 60 * 24;
+    const daysSinceLastOrder = (Date.now() - client.lastOrderDate) / msInDay;
+
+    // VIP → total gasto > R$ 500
+    if (client.totalSpent > 500) {
+        tags.push({ name: 'VIP', color: '#ffc107' }); // Amarelo/Dourado
+    }
+
+    // Fiel → mais de 20 pedidos
+    if (client.totalOrders > 20) {
+        tags.push({ name: 'Fiel', color: '#28a745' }); // Verde
+    }
+
+    // Inativo → sem pedidos há mais de 60 dias
+    if (daysSinceLastOrder > daysInactivity) {
+        tags.push({ name: 'Inativo', color: '#dc3545' }); // Vermelho
+    }
+    
+    return tags;
+}
+
+function filterAndSortCustomers() {
+    const container = document.getElementById("customersList");
+    if (!window.allCustomers) {
+        container.innerHTML = `<p style="color:#888;">Nenhum dado de cliente carregado.</p>`;
+        return;
+    }
+
+    let filteredCustomers = [...window.allCustomers];
+    const searchTerm = document.getElementById("customerSearchInput").value.toLowerCase().trim();
+    const sortKey = document.getElementById("customerSortSelect").value;
+
+    // 1. Filtragem
+    if (searchTerm) {
+        filteredCustomers = filteredCustomers.filter(u => 
+            u.name.toLowerCase().includes(searchTerm) || 
+            u.phone.replace(/\D/g,'').includes(searchTerm.replace(/\D/g,''))
+        );
+    }
+
+    // 2. Ordenação
+    filteredCustomers.sort((a, b) => {
+        switch (sortKey) {
+            case 'totalOrdersDesc':
+                return b.totalOrders - a.totalOrders;
+            case 'totalOrdersAsc':
+                return a.totalOrders - b.totalOrders;
+            case 'totalSpentDesc':
+                return b.totalSpent - a.totalSpent;
+            case 'totalSpentAsc':
+                return a.totalSpent - b.totalSpent;
+            case 'lastOrderDateDesc':
+                return b.lastOrderDate - a.lastOrderDate; // Mais recente (maior timestamp)
+            case 'lastOrderDateAsc':
+                return a.lastOrderDate - b.lastOrderDate; // Mais antigo (menor timestamp)
+            case 'activityScoreDesc':
+                return b.activityScore - a.activityScore;
+            default:
+                return 0;
+        }
+    });
+
+    // 3. Renderização
+    if (filteredCustomers.length === 0) {
+        container.innerHTML = `<p style="color:#777;">Nenhum cliente encontrado com os critérios de busca/filtro.</p>`;
+        return;
+    }
+
+    const html = filteredCustomers.map(u => {
+        const lastOrderDate = u.lastOrderDate ? new Date(u.lastOrderDate).toLocaleDateString('pt-BR') : 'N/A';
+        const totalSpent = formatBRL(u.totalSpent);
+        
+        // Geração das tags
+	        // Geração das tags
+	        const tags = generateCustomerTags(u);
+	        
+	        // Adiciona a tag de Duplicado, se aplicável
+	        if (u.isPossibleDuplicate) {
+	            tags.push({ name: 'Possível duplicado', color: '#ff4500' }); // Laranja/Vermelho para aviso
+	        }
+	        
+	        const tagsHtml = tags.map(tag => `
+            <span style="
+                background-color: ${tag.color}; 
+                color: white; 
+                padding: 2px 8px; 
+                border-radius: 10px; 
+                font-size: 10px; 
+                font-weight: bold; 
+                margin-right: 5px;
+            ">${tag.name}</span>
+        `).join('');
+        
+	        return `
+	            <div style="
+	                background:#fff;
+	                padding:14px 16px;
+	                border-radius:12px;
+	                margin-bottom:10px;
+	                box-shadow:0 3px 10px rgba(0,0,0,0.05);
+	                display:flex;
+	                justify-content:space-between;
+	                align-items:center;
+	                flex-wrap:wrap;
+	            ">
+	                <div style="flex:1; min-width:200px;">
+	                    <div style="font-weight:bold; font-size:16px;">${u.name}</div>
+	                    <div style="font-size:12px; color:#666;">${u.phone}</div>
+	                </div>
+	                <div style="text-align:right; min-width:150px;">
+	                    <div style="font-size:12px; color:#666;">Frequência: 
+	                        <span style="font-weight:bold; color: ${u.frequency <= 7 ? '#28a745' : u.frequency <= 30 ? '#ffc107' : '#dc3545'};">
+	                            ${formatFrequency(u.frequency)}
+	                        </span>
+	                    </div>
+	                    <div style="font-size:12px; color:#666;">Último pedido: ${lastOrderDate}</div>
+	                </div>
+	                <div style="min-width:100px; text-align:right;">
+	                    <div style="font-weight:bold;">${totalSpent}</div>
+	                    <div style="font-size:12px; color:#666;">${u.totalOrders} pedidos</div>
+	                </div>
+	                <div style="margin-top:10px; width:100%;">
+	                    ${tagsHtml}
+                    <button onclick="showOrderHistory('${u.id}', '${u.name}')" style="
+                        background-color: var(--primary);
+                        color: white;
+                        border: none;
+                        padding: 5px 10px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 12px;
+                        margin-left: 10px;
+                    ">Ver Histórico</button>
+                    <button onclick="window.open('https://wa.me/55${u.phone ? u.phone.replace(/\\D/g, '') : ''}', '_blank')" style="
+                        background-color: #25D366;
+                        color: white;
+                        border: none;
+                        padding: 5px 10px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 12px;
+                        margin-left: 5px;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 5px;
+                    " title="Entrar em contato via WhatsApp">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
+                        </svg>
+                        WhatsApp
+                    </button>
+	                </div>
+		            </div>
+        `;
+	    }).join("");
+	
+	    container.innerHTML = html;
+	}
+	
+	window.filterAndSortCustomers = filterAndSortCustomers;
+
+// =========================================================================
+// === FUNÇÕES DO MODAL DE HISTÓRICO DE PEDIDOS (CRM) ===
+// =========================================================================
+
+// Função auxiliar para formatar o status do pedido
+function formatOrderStatus(status) {
+    const statusMap = {
+        'pending': 'Pendente',
+        'preparing': 'Em Preparação',
+        'ready': 'Pronto para Entrega',
+        'delivering': 'Em Entrega',
+        'delivered': 'Entregue',
+        'canceled': 'Cancelado'
+    };
+    const statusColor = {
+        'pending': '#ffc107', // Amarelo
+        'preparing': '#17a2b8', // Azul claro
+        'ready': '#28a745', // Verde
+        'delivering': '#007bff', // Azul
+        'delivered': '#6c757d', // Cinza
+        'canceled': '#dc3545' // Vermelho
+    };
+    const text = statusMap[status] || status;
+    const color = statusColor[status] || '#000';
+    return `<span style="color: ${color}; font-weight: 600;">${text}</span>`;
+}
+
+// Função para abrir o modal e carregar o histórico
+async function showOrderHistoryModal(userId, userName) {
+    const modal = document.getElementById("orderHistoryModal");
+    const listContainer = document.getElementById("historyOrdersList");
+    const infoContainer = document.getElementById("historyClientInfo");
+    
+    infoContainer.textContent = `Cliente: ${userName} (ID: ${userId})`;
+    listContainer.innerHTML = `<p style="color:#888;">Carregando pedidos de ${userName}...</p>`;
+    modal.classList.add('open');
+
+    try {
+        // A variável 'orders' já deve estar populada pela função renderCustomers
+        // ou por uma função de inicialização do sistema.
+        // Se 'orders' não estiver no escopo global, esta parte precisará ser ajustada
+        // para buscar no Firestore, mas a regra é "apenas ler os pedidos já existentes".
+        // Assumindo que 'orders' é uma variável global com todos os pedidos.
+        const clientOrders = orders
+            .filter(o => o.userId === userId)
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // Mais recentes primeiro
+
+        if (clientOrders.length === 0) {
+            listContainer.innerHTML = `<p style="color:#777;">Nenhum pedido encontrado para este cliente.</p>`;
+            return;
+        }
+
+        const ordersHtml = clientOrders.map(order => {
+            const orderDate = new Date(order.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            const orderTime = new Date(order.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            const orderNumber = order.orderNumber || order.id.substring(0, 7).toUpperCase();
+            const total = order.total || 0;
+            const statusHtml = formatOrderStatus(order.status);
+            const paymentMethod = order.paymentMethod || 'Não Informado';
+            const address = order.address || 'Endereço não informado';
+
+            return `
+                <div style="
+                    background:#f9f9f9;
+                    padding:12px;
+                    border-radius:8px;
+                    margin-bottom:10px;
+                    border-left: 4px solid var(--primary);
+                ">
+                    <div style="display:flex; justify-content:space-between; font-weight:bold; margin-bottom:5px;">
+                        <span>Pedido #${orderNumber}</span>
+                        <span>${formatBRL(total)}</span>
+                    </div>
+                    <small style="color:#555;">ID: ${order.id}</small><br>
+                    <small style="color:#555;">Data: ${orderDate} às ${orderTime}</small><br>
+                    <small style="color:#555;">Status: ${statusHtml}</small><br>
+                    <small style="color:#555;">Pagamento: ${paymentMethod}</small><br>
+                    <small style="color:#555;">Endereço: ${address}</small>
+                </div>
+            `;
+        }).join('');
+
+        listContainer.innerHTML = ordersHtml;
+
+    } catch (err) {
+        console.error("Erro ao carregar histórico de pedidos:", err);
+        listContainer.innerHTML = `<p style="color:red;">Erro ao carregar histórico. Verifique o console.</p>`;
+    }
+}
+
+// Função para fechar o modal
+function closeOrderHistoryModal() {
+    document.getElementById("orderHistoryModal").classList.remove('open');
+}
+
+// Função wrapper para compatibilidade (corrige o erro de referência)
+function showOrderHistory(userId, userName) {
+    showOrderHistoryModal(userId, userName);
+}
+
+window.showOrderHistory = showOrderHistory;
+window.showOrderHistoryModal = showOrderHistoryModal;
+window.closeOrderHistoryModal = closeOrderHistoryModal;
+
+// =========================================================================
+// === FUNÇÕES DO MODAL DE LINHA DO TEMPO DO PEDIDO ===
+// =========================================================================
+
+/**
+ * Abre o modal de timeline do pedido e exibe o histórico de status.
+ * @param {string} orderId - ID do pedido
+ */
+function showOrderTimeline(orderId) {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+        alert('Pedido não encontrado.');
+        return;
+    }
+
+    const modal = document.getElementById('orderTimelineModal');
+    const infoContainer = document.getElementById('timelineOrderInfo');
+    const listContainer = document.getElementById('timelineList');
+
+    // Define informações do pedido
+    const orderNumber = order.orderNumber || order.id.substring(0, 7).toUpperCase();
+    infoContainer.textContent = `Pedido #${orderNumber} - ${order.userName || 'Cliente'}`;
+
+    // Mapeamento de status para timeline
+    const statusTimeline = [
+        { key: 'pending', label: '📥 Pedido Recebido', icon: '📥' },
+        { key: 'in_production', label: '🍳 Entrou em Produção', icon: '🍳' },
+        { key: 'ready_for_delivery', label: '✅ Ficou Pronto', icon: '✅' },
+        { key: 'out_for_delivery', label: '🚚 Saiu para Entrega', icon: '🚚' },
+        { key: 'delivered', label: '✔️ Entregue', icon: '✔️' }
+    ];
+
+    // Normaliza o status atual do pedido
+    const currentStatus = order.status || 'pending';
+    
+    // Mapeamento de status antigos para novos
+    const statusMap = {
+        'pending': 'pending',
+        'accepted': 'in_production',
+        'in_production': 'in_production',
+        'ready': 'ready_for_delivery',
+        'ready_for_delivery': 'ready_for_delivery',
+        'delivering': 'out_for_delivery',
+        'out_for_delivery': 'out_for_delivery',
+        'delivered': 'delivered'
+    };
+
+    const normalizedStatus = statusMap[currentStatus] || currentStatus;
+
+    // Encontra o índice do status atual na timeline
+    const currentIndex = statusTimeline.findIndex(s => s.key === normalizedStatus);
+
+    // Gera o HTML da timeline
+    const timelineHtml = statusTimeline.map((step, index) => {
+        let className = '';
+        let timeInfo = '';
+
+        if (index < currentIndex) {
+            className = 'completed';
+            timeInfo = '<div class="timeline-time">Concluído</div>';
+        } else if (index === currentIndex) {
+            className = 'current';
+            const orderDate = new Date(order.createdAt);
+            const formattedDate = orderDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            const formattedTime = orderDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            timeInfo = `<div class="timeline-time">Atual - ${formattedDate} às ${formattedTime}</div>`;
+        } else {
+            timeInfo = '<div class="timeline-time">Pendente</div>';
+        }
+
+        return `
+            <li class="${className}">
+                <div class="timeline-title">${step.label}</div>
+                ${timeInfo}
+            </li>
+        `;
+    }).join('');
+
+    listContainer.innerHTML = timelineHtml;
+    modal.classList.add('open');
+}
+
+/**
+ * Fecha o modal de timeline do pedido.
+ */
+function closeOrderTimelineModal() {
+    document.getElementById('orderTimelineModal').classList.remove('open');
+}
+
+window.showOrderTimeline = showOrderTimeline;
+window.closeOrderTimelineModal = closeOrderTimelineModal;
 
 
 
@@ -1298,9 +2136,9 @@ const firebaseConfig = {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.1.0/firebase-app.js";
 import { 
     getFirestore, collection, doc, getDoc, setDoc, updateDoc, 
-    addDoc, query, orderBy, onSnapshot 
+    addDoc, query, orderBy, onSnapshot, deleteDoc, getDocs 
 } from "https://www.gstatic.com/firebasejs/9.1.0/firebase-firestore.js";
-import { getDocs } from "https://www.gstatic.com/firebasejs/9.1.0/firebase-firestore.js";
+
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -1368,6 +2206,28 @@ async function fetchMenuData() {
         const menuSnap = await getDoc(menuDocRef);
         if (menuSnap.exists()) {
             DATA = menuSnap.data();
+            
+            // Garante que os novos campos de entrega por raio existam
+            if (DATA.restaurant.useRadiusDelivery === undefined) {
+                DATA.restaurant.useRadiusDelivery = false;
+            }
+            if (DATA.restaurant.deliveryBaseFee === undefined) {
+                DATA.restaurant.deliveryBaseFee = 0;
+            }
+            if (DATA.restaurant.deliveryFeePerKm === undefined) {
+                DATA.restaurant.deliveryFeePerKm = 0;
+            }
+            if (DATA.restaurant.restaurantLat === undefined) {
+                DATA.restaurant.restaurantLat = 0;
+            }
+            if (DATA.restaurant.restaurantLng === undefined) {
+                DATA.restaurant.restaurantLng = 0;
+            }
+            // NOVO: Garante que o campo de tempo de preparo exista
+            if (DATA.restaurant.preparationTime === undefined) {
+                DATA.restaurant.preparationTime = 30;
+            }
+            
             console.log("Cardápio carregado do Firebase.");
         } else {
             console.warn("Nenhum dado de cardápio encontrado no Firebase. Usando Demo e salvando.");
@@ -1496,12 +2356,36 @@ function setupRealtimeOrdersListener() {
     });
 }
 // === MOTOBOYS FUNCTIONS (single clean block) ===
-const motoboysCollectionRef = collection(db, "motoboys");
 
+/**
+ * Atualiza o status do motoboy no Firestore.
+ * @param {string} motoboyId ID do motoboy.
+ * @param {string} newStatus Novo status ("disponivel", "ocupado", "offline").
+ */
+async function updateMotoboyStatus(motoboyId, newStatus) {
+  if (!isAdmin) return;
+  try {
+    const motoboyDocRef = doc(db, "motoboys", motoboyId);
+    await updateDoc(motoboyDocRef, { status: newStatus });
+    
+    // Atualiza o array local para re-renderizar
+    const motoboyIndex = motoboys.findIndex(m => m.id === motoboyId);
+    if (motoboyIndex !== -1) {
+        motoboys[motoboyIndex].status = newStatus;
+    }
+    renderMotoboys();
+  } catch (e) {
+    console.error("Erro ao atualizar status do motoboy:", e);
+    alert("Falha ao atualizar status do motoboy.");
+  }
+}
+
+window.updateMotoboyStatus = updateMotoboyStatus;
 async function fetchMotoboys() {
+  const motoboysCollectionRef = collection(db, "motoboys");
   try {
     const snap = await getDocs(motoboysCollectionRef);
-    motoboys = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    motoboys = snap.docs.map(d => ({ id: d.id, status: "offline", entregasHoje: 0, ...d.data() })); // Adiciona status e entregasHoje como padrão
     renderMotoboys();
   } catch (e) {
     console.error("Erro ao carregar motoboys:", e);
@@ -1511,6 +2395,11 @@ async function fetchMotoboys() {
 window.fetchMotoboys = fetchMotoboys;
 
 function renderMotoboys() {
+  const statusMap = {
+    "disponivel": { label: "Disponível", color: "#28a745" }, // Verde
+    "ocupado": { label: "Ocupado / Em Entrega", color: "#ffc107" }, // Amarelo
+    "offline": { label: "Offline", color: "#dc3545" } // Vermelho
+  };
   const container = document.getElementById("motoboysList");
   if(!container) return;
   if(!motoboys || motoboys.length === 0){
@@ -1518,18 +2407,31 @@ function renderMotoboys() {
     return;
   }
   container.innerHTML = motoboys.map(m => {
-    const deliveredCount = (orders || []).filter(o => o.motoboyId === m.id && o.status === 'delivered').length;
+    const currentStatus = m.status || "offline";
+    const statusInfo = statusMap[currentStatus] || statusMap["offline"];
+    const deliveredCount = m.entregasHoje || 0;
     const phoneDigits = (m.phone || '').replace(/\D/g, '');
     return `
-      <div class='menu-card' style='text-align:left;'>
-        <div class='menu-card-body'><div style='display:flex;justify-content:space-between;align-items:center;'>
+      <div class='menu-card' style='text-align:left;display:flex;flex-direction:column;'>
+        <div class='menu-card-body' style='display:flex;flex-direction:column;justify-content:space-between;height:100%;'><div>
             <div>
               <div class='menu-card-title'>${m.name}</div>
               <div style='font-size:13px;color:var(--muted);margin-top:6px;'>📞 ${m.phone || '—'}</div>
-              <div style='font-size:13px;color:var(--muted);margin-top:6px;'>🧾 Entregues: <strong>${deliveredCount}</strong></div>
+              <div style="font-size:13px;margin-top:6px;font-weight:bold;color:${statusInfo.color};">
+                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${statusInfo.color};margin-right:5px;"></span>
+                ${statusInfo.label}
+              </div>
+              <div style="font-size:13px;color:var(--muted);margin-top:6px;">📞 ${m.phone || "—"}</div>
+              <div style="font-size:13px;color:var(--muted);margin-top:6px;">🧾 Entregues Hoje: <strong>${deliveredCount}</strong></div>
             </div>
-            <div style='display:flex;flex-direction:column;gap:8px;'>
-              <a href='https://wa.me/${phoneDigits}' target='_blank' class='menu-card-btn' style='background:#25D366;padding:8px 12px;border-radius:10px;'>💬 WhatsApp</a>
+            <div style='display:flex;flex-direction:column;gap:8px;margin-top:10px;'>
+              <select onchange="updateMotoboyStatus('${m.id}', this.value)" style="padding: 8px; border-radius: 8px; border: 1px solid #ccc; background: #f9f9f9; font-size: 14px;">
+                <option value="disponivel" ${currentStatus === "disponivel" ? "selected" : ""}>🟢 Disponível</option>
+                <option value="ocupado" ${currentStatus === "ocupado" ? "selected" : ""}>🟡 Ocupado / Em Entrega</option>
+                <option value="offline" ${currentStatus === "offline" ? "selected" : ""}>🔴 Offline</option>
+              </select>
+              <button onclick="openMotoboyProfile('${m.id}')" class="menu-card-btn" style="background:var(--primary);color:#fff;border:none;cursor:pointer;padding:8px 12px;border-radius:10px;font-weight:600;">📈 Ver Perfil</button>
+              <a href="https://wa.me/${phoneDigits}" target="_blank" class="menu-card-btn" style="background:#25D366;color:#fff;text-decoration:none;text-align:center;padding:8px 12px;border-radius:10px;">💬 WhatsApp</a>
             </div>
           </div>
         </div>
@@ -1552,7 +2454,7 @@ document.getElementById('motoboyForm')?.addEventListener('submit', async (e) => 
   const phone = document.getElementById('motoboyPhone').value.trim();
   if(!name){ alert('Informe o nome do motoboy'); return; }
   try {
-    await addDoc(motoboysCollectionRef, { name, phone, createdAt: Date.now() });
+    await addDoc(motoboysCollectionRef, { name, phone, createdAt: Date.now(), status: "offline", entregasHoje: 0 });
     document.getElementById('motoboyForm').reset();
     document.getElementById('motoboyModal').classList.remove('open');
     await fetchMotoboys();
@@ -1568,12 +2470,31 @@ window._updateOrderMotoboy = async function(orderId, motoboyId){
   try {
     const orderDocRef = doc(db, "orders", orderId);
     let motoboyName = "";
+    
+    // 1. Lógica de Atribuição/Desatribuição
     if(!motoboyId){
+      // Desatribuir
       await updateDoc(orderDocRef, { motoboyId: "", motoboyName: "" });
     } else {
+      // Atribuir
       const m = motoboys.find(x => x.id === motoboyId);
       motoboyName = m ? m.name : "";
+      
+      // Atualiza o pedido com motoboyId e motoboyName
       await updateDoc(orderDocRef, { motoboyId: motoboyId, motoboyName: motoboyName });
+      
+      // 2. Atualiza o contador de entregas do motoboy (entregasHoje)
+      const motoboyDocRef = doc(db, "motoboys", motoboyId);
+      await updateDoc(motoboyDocRef, { 
+        entregasHoje: increment(1) 
+      });
+      
+      // 3. Atualiza o array local do motoboy para re-renderizar
+      const motoboyIndex = motoboys.findIndex(x => x.id === motoboyId);
+      if (motoboyIndex !== -1) {
+          motoboys[motoboyIndex].entregasHoje = (motoboys[motoboyIndex].entregasHoje || 0) + 1;
+      }
+      renderMotoboys(); // Re-renderiza a lista de motoboys para mostrar o novo contador
     }
     
     // Atualização local do array 'orders' para evitar re-render global
@@ -1594,7 +2515,306 @@ window._updateOrderMotoboy = async function(orderId, motoboyId){
 fetchMotoboys();
 // === END MOTOBOYS ===
 
+/**
+ * Calcula e renderiza o dashboard de motoboys.
+ */
+function renderMotoboyDashboard() {
+    // 1. Motoboys Disponíveis
+    const motoboysDisponiveis = (motoboys || []).filter(m => m.status === 'disponivel').length;
 
+    // 2. Entregas em Andamento (Pedidos atribuídos a motoboy, mas não entregues)
+    const entregasEmAndamento = (orders || []).filter(o => 
+        o.motoboyId && o.motoboyId !== "" && o.status !== 'delivered' && o.status !== 'cancelled'
+    ).length;
+
+    // 3. Tempo Médio de Entrega Hoje
+    const hoje = new Date().toLocaleDateString();
+    let totalTempoEntrega = 0;
+    let entregasHojeCount = 0;
+
+    (orders || []).forEach(o => {
+        if (o.status === 'delivered' && o.createdAt && o.deliveredAt) {
+            const dataCriacao = new Date(o.createdAt);
+            const dataEntrega = new Date(o.deliveredAt);
+            
+            // Verifica se a entrega foi hoje (comparação simples de data)
+            if (dataEntrega.toLocaleDateString() === hoje) {
+                const tempoEntregaMs = dataEntrega.getTime() - dataCriacao.getTime();
+                totalTempoEntrega += tempoEntregaMs;
+                entregasHojeCount++;
+            }
+        }
+    });
+
+    let tempoMedioMinutos = 0;
+    if (entregasHojeCount > 0) {
+        tempoMedioMinutos = Math.round((totalTempoEntrega / entregasHojeCount) / 60000); // Converte ms para minutos
+    }
+    
+    const tempoMedioFormatado = tempoMedioMinutos > 0 ? `${tempoMedioMinutos} min` : 'N/A';
+
+    // === NOVAS MÉTRICAS ADICIONADAS ===
+    
+    // 4. Entregas por Hora (últimas 24h)
+    const agora = Date.now();
+    const ultimas24h = agora - (24 * 60 * 60 * 1000);
+    const entregasUltimas24h = (orders || []).filter(o => 
+        o.status === 'delivered' && o.deliveredAt && o.deliveredAt >= ultimas24h
+    ).length;
+    const entregasPorHora = entregasUltimas24h > 0 ? (entregasUltimas24h / 24).toFixed(1) : '0';
+
+    // 5. Ticket Médio por Motoboy (considerando entregas com motoboy atribuído)
+    let totalValorEntregas = 0;
+    let totalEntregasComMotoboy = 0;
+    (orders || []).forEach(o => {
+        if (o.motoboyId && o.motoboyId !== "" && o.status === 'delivered') {
+            totalValorEntregas += (o.total || 0);
+            totalEntregasComMotoboy++;
+        }
+    });
+    const ticketMedio = totalEntregasComMotoboy > 0 ? (totalValorEntregas / totalEntregasComMotoboy) : 0;
+    const ticketMedioFormatado = ticketMedio > 0 ? formatBRL(ticketMedio) : 'R$ 0,00';
+
+    // 6. Atraso Médio (diferença entre tempo estimado e tempo real)
+    // Assumindo tempo estimado padrão de 45 minutos
+    const tempoEstimadoMinutos = 45;
+    let totalAtraso = 0;
+    let entregasComAtraso = 0;
+    (orders || []).forEach(o => {
+        if (o.status === 'delivered' && o.createdAt && o.deliveredAt) {
+            const dataCriacao = new Date(o.createdAt);
+            const dataEntrega = new Date(o.deliveredAt);
+            const tempoRealMinutos = (dataEntrega.getTime() - dataCriacao.getTime()) / 60000;
+            const atraso = tempoRealMinutos - tempoEstimadoMinutos;
+            if (atraso > 0) {
+                totalAtraso += atraso;
+                entregasComAtraso++;
+            }
+        }
+    });
+    const atrasoMedio = entregasComAtraso > 0 ? Math.round(totalAtraso / entregasComAtraso) : 0;
+    const atrasoMedioFormatado = atrasoMedio > 0 ? `+${atrasoMedio} min` : '0 min';
+
+    // 7. % de Entregas no Prazo
+    let entregasNoPrazo = 0;
+    let totalEntregasAvaliadas = 0;
+    (orders || []).forEach(o => {
+        if (o.status === 'delivered' && o.createdAt && o.deliveredAt) {
+            const dataCriacao = new Date(o.createdAt);
+            const dataEntrega = new Date(o.deliveredAt);
+            const tempoRealMinutos = (dataEntrega.getTime() - dataCriacao.getTime()) / 60000;
+            totalEntregasAvaliadas++;
+            if (tempoRealMinutos <= tempoEstimadoMinutos) {
+                entregasNoPrazo++;
+            }
+        }
+    });
+    const percentualNoPrazo = totalEntregasAvaliadas > 0 ? Math.round((entregasNoPrazo / totalEntregasAvaliadas) * 100) : 0;
+
+    // Renderiza no HTML
+    const container = document.getElementById("motoboyDashboard");
+    if (!container) return;
+
+    container.innerHTML = `
+        <div class="dashboard-card">
+            <div class="value">${motoboysDisponiveis}</div>
+            <div class="label">Motoboys Disponíveis</div>
+        </div>
+        <div class="dashboard-card">
+            <div class="value">${entregasEmAndamento}</div>
+            <div class="label">Entregas em Andamento</div>
+        </div>
+        <div class="dashboard-card">
+            <div class="value">${tempoMedioFormatado}</div>
+            <div class="label">Tempo Médio de Entrega Hoje</div>
+        </div>
+        <div class="dashboard-card">
+            <div class="value">${entregasPorHora}</div>
+            <div class="label">Entregas por Hora (24h)</div>
+        </div>
+        <div class="dashboard-card">
+            <div class="value">${ticketMedioFormatado}</div>
+            <div class="label">Ticket Médio por Motoboy</div>
+        </div>
+        <div class="dashboard-card">
+            <div class="value">${atrasoMedioFormatado}</div>
+            <div class="label">Atraso Médio</div>
+        </div>
+        <div class="dashboard-card">
+            <div class="value">${percentualNoPrazo}%</div>
+            <div class="label">Entregas no Prazo</div>
+        </div>
+    `;
+}
+
+window.renderMotoboyDashboard = renderMotoboyDashboard;
+
+// === FUNÇÕES DO MODAL DE PERFIL DO MOTOBOY ===
+
+let motoboyChartInstance = null; // Instância do gráfico para evitar duplicação
+
+/**
+ * Abre o modal de perfil do motoboy com todas as estatísticas
+ * @param {string} motoboyId - ID do motoboy
+ */
+window.openMotoboyProfile = function(motoboyId) {
+  const motoboy = motoboys.find(m => m.id === motoboyId);
+  if (!motoboy) {
+    alert('Motoboy não encontrado.');
+    return;
+  }
+
+  // Filtra pedidos deste motoboy
+  const motoboyOrders = (orders || []).filter(o => o.motoboyId === motoboyId);
+  const deliveredOrders = motoboyOrders.filter(o => o.status === 'delivered');
+
+  // 1. Entregas Totais
+  const totalEntregas = deliveredOrders.length;
+
+  // 2. Média por Entrega
+  let totalValor = 0;
+  deliveredOrders.forEach(o => {
+    totalValor += (o.total || 0);
+  });
+  const mediaEntrega = totalEntregas > 0 ? (totalValor / totalEntregas) : 0;
+
+  // 3. Tempo Médio
+  let totalTempo = 0;
+  let countTempo = 0;
+  deliveredOrders.forEach(o => {
+    if (o.createdAt && o.deliveredAt) {
+      const tempo = (o.deliveredAt - o.createdAt) / 60000; // minutos
+      totalTempo += tempo;
+      countTempo++;
+    }
+  });
+  const tempoMedio = countTempo > 0 ? Math.round(totalTempo / countTempo) : 0;
+
+  // 4. Entregues Hoje
+  const hoje = new Date().toLocaleDateString();
+  const entregasHoje = deliveredOrders.filter(o => {
+    if (o.deliveredAt) {
+      const dataEntrega = new Date(o.deliveredAt);
+      return dataEntrega.toLocaleDateString() === hoje;
+    }
+    return false;
+  }).length;
+
+  // 5. Áreas que mais entrega
+  const areaStats = {};
+  deliveredOrders.forEach(o => {
+    const area = o.neighborhood || o.address || 'Não informado';
+    if (!areaStats[area]) {
+      areaStats[area] = 0;
+    }
+    areaStats[area]++;
+  });
+  const topAreas = Object.entries(areaStats)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5);
+
+  // 6. Entregas por dia (últimos 7 dias)
+  const ultimos7Dias = [];
+  const entregasPorDia = [];
+  for (let i = 6; i >= 0; i--) {
+    const data = new Date();
+    data.setDate(data.getDate() - i);
+    const dataStr = data.toLocaleDateString();
+    ultimos7Dias.push(data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
+    
+    const count = deliveredOrders.filter(o => {
+      if (o.deliveredAt) {
+        const dataEntrega = new Date(o.deliveredAt);
+        return dataEntrega.toLocaleDateString() === dataStr;
+      }
+      return false;
+    }).length;
+    entregasPorDia.push(count);
+  }
+
+  // Atualiza o modal
+  document.getElementById('motoboyProfileName').textContent = `Perfil: ${motoboy.name}`;
+  document.getElementById('profileTotalEntregas').textContent = totalEntregas;
+  document.getElementById('profileMediaEntrega').textContent = formatBRL(mediaEntrega);
+  document.getElementById('profileTempoMedio').textContent = `${tempoMedio} min`;
+  document.getElementById('profileEntregasHoje').textContent = entregasHoje;
+
+  // Renderiza áreas
+  const areasContainer = document.getElementById('profileTopAreas');
+  if (topAreas.length === 0) {
+    areasContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;">Nenhuma entrega registrada ainda.</div>';
+  } else {
+    areasContainer.innerHTML = topAreas.map(([area, count]) => {
+      const percentual = totalEntregas > 0 ? Math.round((count / totalEntregas) * 100) : 0;
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;">
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:14px;">${area}</div>
+            <div style="font-size:12px;color:var(--muted);">${count} entregas</div>
+          </div>
+          <div style="font-weight:700;color:var(--primary);font-size:16px;">${percentual}%</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Renderiza gráfico
+  const ctx = document.getElementById('motoboyDeliveriesChart');
+  if (ctx) {
+    // Destrói instância anterior se existir
+    if (motoboyChartInstance) {
+      motoboyChartInstance.destroy();
+    }
+    
+    motoboyChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ultimos7Dias,
+        datasets: [{
+          label: 'Entregas',
+          data: entregasPorDia,
+          backgroundColor: 'rgba(128, 0, 128, 0.6)',
+          borderColor: 'rgba(128, 0, 128, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              stepSize: 1
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            display: false
+          }
+        }
+      }
+    });
+  }
+
+  // Abre o modal
+  document.getElementById('motoboyProfileModal').classList.add('open');
+};
+
+/**
+ * Fecha o modal de perfil do motoboy
+ */
+window.closeMotoboyProfile = function() {
+  document.getElementById('motoboyProfileModal').classList.remove('open');
+  // Destrói o gráfico ao fechar
+  if (motoboyChartInstance) {
+    motoboyChartInstance.destroy();
+    motoboyChartInstance = null;
+  }
+};
+
+// === FIM DAS FUNÇÕES DO MODAL DE PERFIL ===
 
 /**
  * Atualiza o status de um pedido no Firestore.
@@ -1699,15 +2919,50 @@ async function finalizeOrder(e) {
       return;
   }
   
-  const selectedOption = document.querySelector("#deliveryAreaSelect").options[document.querySelector("#deliveryAreaSelect").selectedIndex];
-  if (!selectedOption || selectedOption.value === "") {
-      alert("Por favor, selecione sua Área de Entrega para calcular a taxa.");
-      return;
+  // Variáveis para armazenar informações de entrega
+  let deliveryFee = 0;
+  let deliveryAreaName = "";
+  let deliveryAreaId = "";
+  let deliveryDistanceKm = null;
+  
+  // Verifica se o modo automático por raio está ativado
+  if (DATA.restaurant.useRadiusDelivery && window.autoDeliveryFee) {
+    // Usa valores calculados automaticamente
+    deliveryFee = window.autoDeliveryFee;
+    deliveryAreaName = window.autoDeliveryDistanceKm.toFixed(1) + " km";
+    deliveryAreaId = "radius_auto";
+    deliveryDistanceKm = window.autoDeliveryDistanceKm;
+  } else {
+    // Usa o sistema tradicional de áreas de entrega
+    const selectedOption = document.querySelector("#deliveryAreaSelect").options[document.querySelector("#deliveryAreaSelect").selectedIndex];
+    if (!selectedOption || selectedOption.value === "") {
+        alert("Por favor, selecione sua Área de Entrega para calcular a taxa.");
+        return;
+    }
+    deliveryFee = parseFloat(selectedOption.dataset.fee);
+    deliveryAreaName = selectedOption.textContent.split('(')[0].trim();
+    deliveryAreaId = selectedOption.value;
   }
-
-  const deliveryFee = parseFloat(selectedOption.dataset.fee);
   const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
-  const total = subtotal + deliveryFee;
+  
+  let discount = 0;
+  let couponCode = null;
+  
+  if (appliedCoupon) {
+    if (appliedCoupon.type === 'percent') {
+      discount = subtotal * (appliedCoupon.value / 100);
+    } else {
+      discount = appliedCoupon.value;
+    }
+    
+    if (discount > subtotal) {
+      discount = subtotal;
+    }
+    
+    couponCode = appliedCoupon.code;
+  }
+  
+  const total = subtotal - discount + deliveryFee;
   
   const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
   let changeNeeded = 0;
@@ -1720,14 +2975,21 @@ async function finalizeOrder(e) {
     }
   }
 
+  // NOVO: Calcula ETA de preparo baseado na configuração
+  const preparationTime = DATA.restaurant.preparationTime || 30;
+  const estimatedReadyTime = new Date(Date.now() + preparationTime * 60 * 1000);
+  
   const newOrder = {
     userId: currentUser.id,
     userName: document.querySelector("#checkoutName").value.trim(),
     userPhone: document.querySelector("#checkoutPhone").value.trim(),
     address: document.querySelector("#checkoutAddress").value.trim(),
-    deliveryAreaId: document.querySelector("#deliveryAreaSelect").value,
-    deliveryAreaName: selectedOption.textContent.split('(')[0].trim(),
+    deliveryAreaId: deliveryAreaId,
+    deliveryAreaName: deliveryAreaName,
     deliveryFee: deliveryFee,
+    deliveryDistanceKm: deliveryDistanceKm || null,
+    preparationTime: preparationTime,
+    estimatedReadyTime: estimatedReadyTime.toISOString(),
     items: ((cart || [])).map(item => ({
         itemId: item.itemId,
         name: item.name,
@@ -1754,6 +3016,8 @@ async function finalizeOrder(e) {
         })
     })),
     subtotal: subtotal,
+    discount: discount,
+    couponCode: couponCode,
     total: total,
     paymentMethod: paymentMethod,
     changeNeeded: changeNeeded,
@@ -1763,8 +3027,19 @@ async function finalizeOrder(e) {
   
   try {
       const docRef = await addDoc(ordersCollectionRef, newOrder);
+      
+      // Incrementa o contador de uso do cupom
+      if (appliedCoupon) {
+        const coupon = DATA.restaurant.coupons.find(c => c.id === appliedCoupon.id);
+        if (coupon) {
+          coupon.usedCount = (coupon.usedCount || 0) + 1;
+          await saveMenuData();
+        }
+      }
+      
       cart = [];
       saveCart();
+      appliedCoupon = null; // Limpa o cupom aplicado
       closeCheckoutModal();
       renderCart();
       showConfirmationModal({ ...newOrder, id: docRef.id });
@@ -1789,7 +3064,13 @@ function loadDemoData(){
             deliveryAreas: [
                 { id: 'area1', name: 'Centro da Cidade', fee: 5.00 },
                 { id: 'area2', name: 'Região Oeste', fee: 8.00 }
-            ]
+            ],
+            coupons: [],
+            useRadiusDelivery: false,
+            deliveryBaseFee: 0,
+            deliveryFeePerKm: 0,
+            restaurantLat: 0,
+            restaurantLng: 0
         },
         categories:[
             {id:"lanc", title:"LANÇAMENTOS"},
@@ -2001,11 +3282,205 @@ function removeUserAddress(index) {
   }
 }
 
+/**
+ * Retorna o status do cliente baseado na quantidade de pedidos.
+ * @param {number} orderCount - Número total de pedidos do cliente.
+ * @returns {{text: string, color: string}}
+ */
+/**
+ * Calcula as métricas de consumo e favoritos do cliente.
+ * @param {Array} userOrders - Lista de pedidos do cliente.
+ * @returns {Object} - Métricas calculadas.
+ */
+function calculateClientMetrics(userOrders) {
+    const metrics = {
+        totalSpent: 0,
+        totalOrders: userOrders.length,
+        averageTicket: 0,
+        mostOrderedProduct: 'N/A',
+        preferredPaymentMethod: 'N/A',
+        favoriteProducts: []
+    };
+
+    if (userOrders.length === 0) {
+        return metrics;
+    }
+
+    let totalSum = 0;
+    const productCounts = {};
+    const paymentCounts = {};
+    let totalDeliveryTime = 0;
+    let deliveredOrdersCount = 0;
+
+    userOrders.forEach(order => {
+        // 1. Total Gasto
+        totalSum += order.total || 0;
+
+        // 2. Contagem de Produtos e Forma de Pagamento
+        (order.items || []).forEach(item => {
+            const itemName = item.name;
+            productCounts[itemName] = (productCounts[itemName] || 0) + (item.qty || 1);
+        });
+
+        const paymentMethod = order.paymentMethod || 'Não Informado';
+        paymentCounts[paymentMethod] = (paymentCounts[paymentMethod] || 0) + 1;
+        
+        // 3. Cálculo do Tempo Médio de Entrega (Apenas para pedidos 'delivered')
+        if (order.status === 'delivered' && order.createdAt && order.deliveredAt) {
+            const timeCreated = new Date(order.createdAt).getTime();
+            const timeDelivered = new Date(order.deliveredAt).getTime();
+            const deliveryDurationMinutes = (timeDelivered - timeCreated) / (1000 * 60); // Diferença em minutos
+            
+            if (deliveryDurationMinutes > 0) {
+                totalDeliveryTime += deliveryDurationMinutes;
+                deliveredOrdersCount++;
+            }
+        }
+    });
+
+    metrics.totalSpent = totalSum;
+    
+    // 4. Tempo Médio de Entrega
+    metrics.averageDeliveryTime = deliveredOrdersCount > 0 
+        ? Math.round(totalDeliveryTime / deliveredOrdersCount) 
+        : null;
+    
+    // 3. Ticket Médio
+    metrics.averageTicket = totalSum / userOrders.length;
+
+    // 4. Produto Mais Pedido
+    let maxProductCount = 0;
+    let mostOrderedProduct = 'N/A';
+    for (const product in productCounts) {
+        if (productCounts[product] > maxProductCount) {
+            maxProductCount = productCounts[product];
+            mostOrderedProduct = product;
+        }
+    }
+    metrics.mostOrderedProduct = mostOrderedProduct;
+
+    // 5. Forma de Pagamento Preferida
+    let maxPaymentCount = 0;
+    let preferredPaymentMethod = 'N/A';
+    for (const method in paymentCounts) {
+        if (paymentCounts[method] > maxPaymentCount) {
+            maxPaymentCount = paymentCounts[method];
+            preferredPaymentMethod = method;
+        }
+    }
+    metrics.preferredPaymentMethod = preferredPaymentMethod;
+
+    // 6. Produtos Favoritos (Top 5)
+    metrics.favoriteProducts = Object.entries(productCounts)
+        .sort(([, countA], [, countB]) => countB - countA)
+        .slice(0, 5)
+        .map(([name, count]) => ({ name, count }));
+
+    return metrics;
+}
+
+function getClientStatus(orderCount) {
+    if (orderCount === 0) {
+        return { text: '⭐ Novo Cliente', color: '#007bff' }; // Azul
+    } else if (orderCount >= 1 && orderCount <= 5) {
+        return { text: '⭐⭐ Cliente Recorrente', color: '#ffc107' }; // Amarelo
+    } else {
+        return { text: '⭐⭐⭐ Cliente VIP', color: '#dc3545' }; // Vermelho (VIP)
+    }
+}
+
 function renderProfileOrders() {
   const list = document.querySelector("#profileOrders");
   list.innerHTML = '';
   
   const userOrders = ((orders || [])).filter(o => o.userId === currentUser.id);
+  
+  // 1. Calcula as métricas e atualiza o Card de Status do Cliente
+  const metrics = calculateClientMetrics(userOrders);
+  
+  const status = getClientStatus(metrics.totalOrders);
+  const statusElement = document.querySelector("#clientStatusText");
+  if (statusElement) {
+      statusElement.textContent = status.text;
+      statusElement.style.color = status.color;
+  }
+  
+  // 2. Preenche o Painel Meu Consumo
+  document.querySelector("#totalSpent").textContent = formatBRL(metrics.totalSpent);
+  document.querySelector("#averageTicket").textContent = formatBRL(metrics.averageTicket);
+  document.querySelector("#totalOrders").textContent = metrics.totalOrders;
+  document.querySelector("#mostOrderedProduct").textContent = metrics.mostOrderedProduct;
+  document.querySelector("#preferredPaymentMethod").textContent = metrics.preferredPaymentMethod;
+  
+  // 3. Preenche o Badge de Tempo Médio de Entrega
+  const deliveryTimeCard = document.querySelector("#averageDeliveryTimeCard");
+  const deliveryTimeText = document.querySelector("#averageDeliveryTimeText");
+  if (metrics.averageDeliveryTime !== null) {
+      deliveryTimeText.textContent = `${metrics.averageDeliveryTime} min`;
+      deliveryTimeCard.style.display = 'block';
+  } else {
+      deliveryTimeCard.style.display = 'none';
+  }
+  
+  // 4. Preenche Meus Favoritos
+  const favoritesList = document.querySelector("#favoriteProductsList");
+  if (metrics.favoriteProducts.length > 0) {
+      favoritesList.innerHTML = metrics.favoriteProducts.map(fav => `
+          <div style="display:flex; justify-content:space-between; padding: 6px 0; border-bottom: 1px dashed #eee;">
+              <span style="font-weight: 600;">${fav.name}</span>
+              <span class="pill" style="background: var(--primary); color: white; padding: 2px 8px;">${fav.count} pedidos</span>
+          </div>
+      `).join('');
+  } else {
+      favoritesList.innerHTML = '<div class="small" style="color:var(--muted)">Nenhum favorito ainda. Faça mais pedidos!</div>';
+  }
+  
+  // 5. Preenche Cupons Disponíveis
+  const couponsList = document.querySelector("#availableCouponsList");
+  const allCoupons = DATA.restaurant.coupons || [];
+  const validCoupons = allCoupons.filter(coupon => {
+      // Verifica se o cupom está ativo
+      if (!coupon.active) return false;
+      
+      // Verifica a data de expiração
+      const today = new Date().toISOString().split('T')[0];
+      if (coupon.expiresAt < today) return false;
+      
+      // Verifica o limite de uso
+      if (coupon.usedCount >= coupon.maxUses) return false;
+      
+      return true;
+  });
+  
+  if (validCoupons.length > 0) {
+      couponsList.innerHTML = validCoupons.map(coupon => {
+          const typeLabel = coupon.type === 'percent' ? '%' : 'R$';
+          return `
+              <div style="
+                  border: 1px solid #ffc107; 
+                  border-radius: 8px; 
+                  padding: 10px; 
+                  margin-bottom: 8px; 
+                  background: #fffbe6;
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+              ">
+                  <div>
+                      <strong style="color: #ffc107; font-size: 16px;">${coupon.code}</strong>
+                      <div class="small" style="color:var(--muted); margin-top: 4px;">
+                          Desconto de ${coupon.value}${typeLabel} | Mínimo: ${formatBRL(coupon.minSubtotal)}
+                      </div>
+                  </div>
+                  <span class="pill" style="background: #ffc107; color: #333; font-weight: 700;">
+                      Válido
+                  </span>
+              </div>
+          `;
+      }).join('');
+  } else {
+      couponsList.innerHTML = '<div class="small" style="color:var(--muted)">Nenhum cupom disponível no momento.</div>';
+  }
 
   if (userOrders.length === 0) {
     list.innerHTML = '<div class="small" style="color:var(--muted)">Nenhum pedido realizado.</div>';
@@ -2024,7 +3499,16 @@ function renderProfileOrders() {
         </div>
         <div class="small" style="color:var(--muted); margin: 4px 0;">Total: ${formatBRL(order.total)} • Em: ${new Date(order.createdAt).toLocaleDateString()}</div>
         <div style="font-size:12px; margin-top: 8px;">
-            ${((order.items || [])).map(item => `${item.qty}x ${item.name}`).join('<br>')}
+            <button onclick="showOrderTimeline('${order.id}')" style="
+                background-color: var(--primary);
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 12px;
+                margin-top: 5px;
+            ">📜 Ver histórico detalhado</button>
         </div>
     `;
     list.appendChild(div);
@@ -2131,7 +3615,8 @@ function renderItems(){
     const itemsEl = document.querySelector("#items");
     itemsEl.innerHTML = '';
     
-    const items = ((DATA.items || [])).filter(i => i.category === activeCat);
+      const allItems = ((DATA.items || [])).filter(i => i.category === activeCat);
+    const items = isAdmin ? allItems : allItems.filter(i => !i.isPaused);
     
     // === ADMIN: layout antigo ===
     if (isAdmin) {
@@ -2155,7 +3640,7 @@ function renderItems(){
               <div class="info" style="flex:1;">
                   <h3>
                       <span>${item.name}</span>
-                      <span style="color:var(--primary); font-weight:800">${formatBRL(item.totalPrice / item.qty)}</span>
+                      <span style="color:var(--primary); font-weight:800">${formatBRL(item.price)}</span>
                   </h3>
                   <p>${item.desc}</p>
                   <div class="actions">
@@ -2163,8 +3648,7 @@ function renderItems(){
                           <button class="pill" data-id="${item.id}" data-action="manage-addons">Adicionais</button>
                           <button class="pill" data-id="${item.id}" data-action="edit-image">Imagem</button>
                           <button class="pill" data-id="${item.id}" data-action="edit-item">Editar</button>
-                          <button class="pill" data-id="${item.id}" data-action="delete-item" style="background:#dc3545; color:white;">Deletar</button>
-                      </div>
+                        <button class=\"pill\" data-id=\"${item.id}\" data-action=\"delete-item\" style=\"background:#dc3545; color:white;\">Deletar</button>\n<button class=\"pill\" data-id=\"${item.id}\" data-action=\"toggle-pause\" style=\"background:${item.isPaused ? '#28a745' : '#ffc107'}; color:white;\">${item.isPaused ? 'Reativar' : 'Pausar'}</button>
                       <button class=\"btn\" data-id=\"${item.id}\" data-action=\"add-to-cart\">${item.addonGroups.length > 0 ? 'Ver Opções' : 'Adicionar'}</button>
                   </div>
               </div>
@@ -2193,7 +3677,7 @@ function renderItems(){
             <img src="${item.img || blankSVG()}" alt="${item.name}" class="menu-card-img">
             <div class="menu-card-body">
                 <h3 class="menu-card-title">${item.name}</h3>
-                <p class="menu-card-price">${formatBRL(item.totalPrice / item.qty)}</p>
+                <p class="menu-card-price">${formatBRL(item.price)}</p>
                 <button class="btn menu-card-btn" data-id="${item.id}" data-action="add-to-cart">Comprar</button>
             </div>
         `;
@@ -2227,7 +3711,15 @@ function handleItemAction(action, itemId){
         case 'manage-addons':
             openAddonManagementModal(item);
             break;
-        case 'delete-item':
+        case 'toggle-pause':
+                const itemToToggle = getItem(itemId);
+                if (itemToToggle) {
+                    itemToToggle.isPaused = !itemToToggle.isPaused;
+                    saveMenuData();
+                    renderItems();
+                }
+                break;
+            case 'delete-item':
             if(confirm(`Tem certeza que deseja deletar o item "${item.name}"?`)){
                 DATA.items = ((DATA.items || [])).filter(i => i.id !== itemId);
                 saveMenuData();
@@ -2595,11 +4087,10 @@ async function finalizePDVOrder(clientName = "") {
       return;
     }
 
-    if (!pdvCartState || !pdvCartState.tableId || (pdvCartState.items || []).length === 0) {
-      if(!isAddingItems){
+    // Se não está adicionando itens, e não tem itens no carrinho, não faz nada.
+    if (!isAddingItems && (!pdvCartState || !pdvCartState.tableId || (pdvCartState.items || []).length === 0)) {
         alert("Nenhum item no pedido da mesa.");
         return;
-      }
     }
 
     const newItemsSubtotal = (pdvCartState.items || []).reduce((sum, item) => sum + item.totalPrice, 0);
@@ -2630,7 +4121,7 @@ async function finalizePDVOrder(clientName = "") {
             return group.selected
               .filter(a => a.qty > 0)
               .map(a => {
-                const addonDef = originalGroup.addons.find(x => x.id === a.addonId);
+                const addonDef = originalItem.addons.find(x => x.id === a.addonId);
                 return {
                   groupName: originalGroup.name,
                   name: addonDef ? addonDef.name : "Adicional",
@@ -2745,21 +4236,44 @@ async function closeTableAccount(tableId){
         return;
     }
     
+    // Calcula o total incluindo comandas avulsas
+    let totalComandas = 0;
+    if (table.comandasAvulsas && table.comandasAvulsas.length > 0) {
+        totalComandas = table.comandasAvulsas.reduce((sum, c) => sum + (c.totalCalculado || 0), 0);
+    }
+    
+    const totalGeral = (order.total || 0) + totalComandas;
+    
     // 1. Confirmação e Fechamento
-    if(confirm(`Resumo do pedido (#${order.id.substring(0,7)})\\nTotal: ${formatBRL(order.total)}\\nConfirma pagamento e fechamento da mesa?`)){
+    let resumo = `Resumo do pedido (#${order.id.substring(0,7)})\\n`;
+    resumo += `Itens do cardápio: ${formatBRL(order.total || 0)}\\n`;
+    if (totalComandas > 0) {
+        resumo += `Comandas avulsas: ${formatBRL(totalComandas)}\\n`;
+    }
+    resumo += `Total: ${formatBRL(totalGeral)}\\nConfirma pagamento e fechamento da mesa?`;
+    
+    if(confirm(resumo)){
         
         // 2. Marca o pedido como "delivered" (entregue/finalizado) no Firestore
+        // e salva as comandas avulsas junto com o pedido
         try {
             const orderDocRef = doc(ordersCollectionRef, order.id);
-            await updateDoc(orderDocRef, { status: 'delivered', closedAt: new Date().toISOString() });
+            await updateDoc(orderDocRef, { 
+                status: 'delivered', 
+                closedAt: new Date().toISOString(),
+                comandasAvulsas: table.comandasAvulsas || [],
+                totalComandas: totalComandas,
+                totalGeral: totalGeral
+            });
         } catch(e){
             console.error("Erro ao atualizar status do pedido no Firestore:", e);
             alert("Erro ao finalizar pedido no sistema. Verifique o console.");
             return;
         }
         
-        // 3. Libera a mesa (limpa orderId e status)
+        // 3. Libera a mesa (limpa orderId, status e comandas avulsas)
         table.orderId = null;
+        table.comandasAvulsas = []; // Limpa as comandas avulsas ao fechar a mesa
         // table.status = 'livre'; // O status agora é determinado pela presença de orderId
         await saveMenuData();
         
@@ -2772,48 +4286,429 @@ async function closeTableAccount(tableId){
 
 // ------------------------------------------------------
 
+// === COMANDAS AVULSAS ===
+
+// Variável global para armazenar a mesa atual ao abrir modal de comanda
+let currentComandaTableId = null;
+
+/**
+ * Abre o modal de escolha do tipo de comanda (valor ou peso)
+ */
+function openComandaChoiceModal(tableId) {
+    currentComandaTableId = tableId;
+    document.querySelector("#comandaChoiceModal").classList.add('open');
+    // Garante que o modal de escolha esteja acima do modal de detalhes da mesa
+    document.querySelector("#comandaChoiceModal").style.zIndex = 1000;
+}
+
+/**
+ * Abre o modal de comanda por valor
+ */
+function openComandaValorModal() {
+    document.querySelector("#comandaChoiceModal").classList.remove('open');
+    document.querySelector("#comandaModal").classList.add('open');
+    document.querySelector("#comandaModal").style.zIndex = 1001; // Acima do modal de escolha e detalhes
+    // Limpa o formulário
+    document.querySelector("#comandaForm").reset();
+}
+
+/**
+ * Abre o modal de comanda por peso
+ */
+function openComandaPesoModal() {
+    document.querySelector("#comandaChoiceModal").classList.remove('open');
+    document.querySelector("#comandaPesoModal").classList.add('open');
+    document.querySelector("#comandaPesoModal").style.zIndex = 1001; // Acima do modal de escolha e detalhes
+    // Limpa o formulário
+    document.querySelector("#comandaPesoForm").reset();
+    document.querySelector("#comandaPesoTotal").value = '';
+}
+
+/**
+ * Calcula automaticamente o total da comanda por peso
+ */
+function calculatePesoTotal() {
+    const peso = parseFloat(document.querySelector("#comandaPesoWeight").value) || 0;
+    const valorKg = parseFloat(document.querySelector("#comandaPesoValuePerKg").value) || 0;
+    const total = peso * valorKg;
+    document.querySelector("#comandaPesoTotal").value = formatBRL(total);
+}
+
+/**
+ * Salva uma comanda avulsa por valor
+ */
+async function saveComandaValor(e) {
+    e.preventDefault();
+    
+    if (!isAdmin) {
+        alert("Apenas administradores podem criar comandas avulsas.");
+        return;
+    }
+    
+    if (!currentComandaTableId) {
+        alert("Erro: Mesa não identificada.");
+        return;
+    }
+    
+    const table = (DATA.restaurant.tables || []).find(t => t.id === currentComandaTableId);
+    if (!table) {
+        alert("Erro: Mesa não encontrada.");
+        return;
+    }
+    
+    // Coleta dados do formulário
+    const cliente = document.querySelector("#comandaName").value.trim();
+    const valorFixo = parseFloat(document.querySelector("#comandaValue").value) || 0;
+    const pagamento = document.querySelector("#comandaPayment").value;
+    const cpf = document.querySelector("#comandaCPF").value.trim();
+    
+    if (!cliente || valorFixo <= 0) {
+        alert("Preencha o nome do cliente e o valor.");
+        return;
+    }
+    
+    // Cria a comanda
+    const comanda = {
+        id: Date.now().toString(),
+        tipo: "valor",
+        cliente: cliente,
+        cpf: cpf || null,
+        pagamento: pagamento,
+        valorFixo: valorFixo,
+        totalCalculado: valorFixo,
+        criadoEm: new Date().toISOString()
+    };
+    
+    // Inicializa o array de comandas se não existir
+    if (!table.comandasAvulsas) {
+        table.comandasAvulsas = [];
+    }
+    
+    // Adiciona a comanda à mesa
+    table.comandasAvulsas.push(comanda);
+    
+    // Salva no Firebase
+    try {
+        await saveMenuData();
+        alert(`Comanda por valor adicionada: ${cliente} - ${formatBRL(valorFixo)}`);
+    closeComandaModals();
+    document.querySelector("#comandaForm").reset();
+    
+    // Atualiza o modal de detalhes se estiver aberto
+    if (currentTableId === currentComandaTableId) {
+        updateTableDetailsComandas();
+    }
+    } catch (e) {
+        console.error("Erro ao salvar comanda:", e);
+        alert("Falha ao salvar comanda. Verifique o console.");
+    }
+}
+
+/**
+ * Salva uma comanda avulsa por peso
+ */
+async function saveComandaPeso(e) {
+    e.preventDefault();
+    
+    if (!isAdmin) {
+        alert("Apenas administradores podem criar comandas avulsas.");
+        return;
+    }
+    
+    if (!currentComandaTableId) {
+        alert("Erro: Mesa não identificada.");
+        return;
+    }
+    
+    const table = (DATA.restaurant.tables || []).find(t => t.id === currentComandaTableId);
+    if (!table) {
+        alert("Erro: Mesa não encontrada.");
+        return;
+    }
+    
+    // Coleta dados do formulário
+    const cliente = document.querySelector("#comandaPesoName").value.trim();
+    const peso = parseFloat(document.querySelector("#comandaPesoWeight").value) || 0;
+    const valorKg = parseFloat(document.querySelector("#comandaPesoValuePerKg").value) || 0;
+    const pagamento = document.querySelector("#comandaPesoPayment").value;
+    const cpf = document.querySelector("#comandaPesoCPF").value.trim();
+    
+    if (!cliente || peso <= 0 || valorKg <= 0) {
+        alert("Preencha todos os campos obrigatórios.");
+        return;
+    }
+    
+    const total = peso * valorKg;
+    
+    // Cria a comanda
+    const comanda = {
+        id: Date.now().toString(),
+        tipo: "peso",
+        cliente: cliente,
+        cpf: cpf || null,
+        pagamento: pagamento,
+        peso: peso,
+        valorKg: valorKg,
+        totalCalculado: total,
+        criadoEm: new Date().toISOString()
+    };
+    
+    // Inicializa o array de comandas se não existir
+    if (!table.comandasAvulsas) {
+        table.comandasAvulsas = [];
+    }
+    
+    // Adiciona a comanda à mesa
+    table.comandasAvulsas.push(comanda);
+    
+    // Salva no Firebase
+    try {
+        await saveMenuData();
+        alert(`Comanda por peso adicionada: ${cliente} - ${peso}kg x ${formatBRL(valorKg)}/kg = ${formatBRL(total)}`);
+    closeComandaModals();
+    document.querySelector("#comandaPesoForm").reset();
+    
+    // Atualiza o modal de detalhes se estiver aberto
+    if (currentTableId === currentComandaTableId) {
+        updateTableDetailsComandas();
+    }
+    } catch (e) {
+        console.error("Erro ao salvar comanda:", e);
+        alert("Falha ao salvar comanda. Verifique o console.");
+    }
+}
+
+/**
+ * Atualiza a exibição das comandas avulsas no modal de detalhes da mesa
+ */
+function updateTableDetailsComandas() {
+    if (!currentTableId) return;
+    
+    const table = (DATA.restaurant.tables || []).find(t => t.id === currentTableId);
+    if (!table) return;
+    
+    const comandasList = document.querySelector("#tableDetailsComandasAvulsas");
+    if (!comandasList) return;
+    
+    comandasList.innerHTML = '';
+    
+    const comandas = table.comandasAvulsas || [];
+    
+    if (comandas.length === 0) {
+        comandasList.innerHTML = '<div class="small" style="color:var(--muted);">Nenhuma comanda avulsa nesta mesa.</div>';
+        return;
+    }
+    
+    comandas.forEach((comanda, index) => {
+        const div = document.createElement('div');
+        div.style.cssText = 'font-size:14px; margin-bottom: 8px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9;';
+        
+        let detalhes = '';
+        if (comanda.tipo === 'valor') {
+            detalhes = `<strong>Valor Fixo:</strong> ${formatBRL(comanda.valorFixo)}`;
+        } else if (comanda.tipo === 'peso') {
+            detalhes = `<strong>Peso:</strong> ${comanda.peso}kg x ${formatBRL(comanda.valorKg)}/kg`;
+        }
+        
+        const pagamentoLabel = {
+            'pix': 'PIX',
+            'credit': 'Crédito',
+            'debit': 'Débito',
+            'cash': 'Dinheiro'
+        }[comanda.pagamento] || comanda.pagamento;
+        
+        div.innerHTML = `
+            <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                <span style="font-weight:600;">📋 ${comanda.cliente}</span>
+                <span style="font-weight:700; color:var(--primary);">${formatBRL(comanda.totalCalculado)}</span>
+            </div>
+            <div class="small" style="color:var(--muted); margin-bottom: 4px;">
+                ${detalhes}
+            </div>
+            <div class="small" style="color:var(--muted);">
+                <strong>Pagamento:</strong> ${pagamentoLabel}
+                ${comanda.cpf ? ` | <strong>CPF:</strong> ${comanda.cpf}` : ''}
+            </div>
+            <button class="pill" style="margin-top:6px; background:#fbe6e6; color:#dc3545; font-size:12px; padding:4px 8px;" onclick="removeComanda('${currentTableId}', ${index})">Remover</button>
+        `;
+        
+        comandasList.appendChild(div);
+    });
+    
+    // Atualiza o total da mesa incluindo comandas
+    updateTableDetailsTotal();
+}
+
+/**
+ * Atualiza o total da mesa incluindo itens do cardápio e comandas avulsas
+ */
+function updateTableDetailsTotal() {
+    if (!currentTableId) return;
+    
+    const table = (DATA.restaurant.tables || []).find(t => t.id === currentTableId);
+    if (!table || !table.orderId) return;
+    
+    const order = orders.find(o => o.id === table.orderId);
+    if (!order) return;
+    
+    // Total dos itens do cardápio
+    let totalItens = order.total || 0;
+    
+    // Total das comandas avulsas
+    let totalComandas = 0;
+    if (table.comandasAvulsas && table.comandasAvulsas.length > 0) {
+        totalComandas = table.comandasAvulsas.reduce((sum, c) => sum + (c.totalCalculado || 0), 0);
+    }
+    
+    const totalGeral = totalItens + totalComandas;
+    
+    document.querySelector("#tableDetailsTotal").textContent = formatBRL(totalGeral);
+}
+
+/**
+ * Remove uma comanda avulsa da mesa
+ */
+window.removeComanda = async function(tableId, comandaIndex) {
+    if (!isAdmin) {
+        alert("Apenas administradores podem remover comandas.");
+        return;
+    }
+    
+    const table = (DATA.restaurant.tables || []).find(t => t.id === tableId);
+    if (!table || !table.comandasAvulsas) return;
+    
+    if (!confirm("Deseja realmente remover esta comanda?")) return;
+    
+    table.comandasAvulsas.splice(comandaIndex, 1);
+    
+    try {
+        await saveMenuData();
+        alert("Comanda removida com sucesso.");
+        
+        if (currentTableId === tableId) {
+            updateTableDetailsComandas();
+        }
+    } catch (e) {
+        console.error("Erro ao remover comanda:", e);
+        alert("Falha ao remover comanda. Verifique o console.");
+    }
+};
+
+// Event Listeners para os modais de comanda
+document.addEventListener("DOMContentLoaded", () => {
+    // Botões de escolha do tipo de comanda
+    const btnComandaValor = document.querySelector("#btnComandaValor");
+    if (btnComandaValor) {
+        btnComandaValor.addEventListener("click", openComandaValorModal);
+    }
+    
+    const btnComandaPeso = document.querySelector("#btnComandaPeso");
+    if (btnComandaPeso) {
+        btnComandaPeso.addEventListener("click", openComandaPesoModal);
+    }
+    
+    // Formulário de comanda por valor
+    const comandaForm = document.querySelector("#comandaForm");
+    if (comandaForm) {
+        comandaForm.addEventListener("submit", saveComandaValor);
+    }
+    
+    const comandaCancel = document.querySelector("#comandaCancel");
+    if (comandaCancel) {
+        comandaCancel.addEventListener("click", closeComandaModals);
+    }
+    
+    // Formulário de comanda por peso
+    const comandaPesoForm = document.querySelector("#comandaPesoForm");
+    if (comandaPesoForm) {
+        comandaPesoForm.addEventListener("submit", saveComandaPeso);
+    }
+    
+    const comandaPesoCancel = document.querySelector("#comandaPesoCancel");
+    if (comandaPesoCancel) {
+        comandaPesoCancel.addEventListener("click", closeComandaModals);
+    }
+    
+    // Cálculo automático do total por peso
+    const pesoWeight = document.querySelector("#comandaPesoWeight");
+    const pesoValuePerKg = document.querySelector("#comandaPesoValuePerKg");
+    
+    if (pesoWeight) {
+        pesoWeight.addEventListener("input", calculatePesoTotal);
+    }
+    
+    if (pesoValuePerKg) {
+        pesoValuePerKg.addEventListener("input", calculatePesoTotal);
+    }
+});
+
+// ------------------------------------------------------
+
 // === Table Details Modal (Gerenciamento de Mesa Ocupada) ===
 
 let currentTableId = null;
 
 function openTableDetailsModal(tableId){
     const table = (DATA.restaurant.tables || []).find(t => t.id === tableId);
-    if(!table || !table.orderId) return;
+    if(!table) return;
     
     currentTableId = tableId;
-    const order = orders.find(o => o.id === table.orderId);
-    if(!order) return alert('Pedido da mesa não encontrado. Tente novamente.');
-
+    const order = table.orderId ? orders.find(o => o.id === table.orderId) : null;
+    
     document.querySelector("#tableDetailsTableName").textContent = table.name || 'Mesa ' + table.id.substring(0,4);
-    document.querySelector("#tableDetailsClientName").textContent = order.userName || 'N/A';
-    document.querySelector("#tableDetailsPaymentMethod").value = order.paymentMethod || 'cash';
-    document.querySelector("#tableDetailsTotal").textContent = formatBRL(order.total);
+    
+    // Oculta/Exibe seções baseadas na existência de um pedido (orderId)
+    const hasOrder = !!order;
+    document.querySelector("#tableDetailsClientName").textContent = hasOrder ? (order.userName || 'N/A') : 'N/A';
+    document.querySelector("#tableDetailsPaymentMethod").value = hasOrder ? (order.paymentMethod || 'cash') : 'cash';
     
     const itemsList = document.querySelector("#tableDetailsOrderItems");
     itemsList.innerHTML = '';
     
-    (order.items || []).forEach(item => {
-        const div = document.createElement('div');
-        div.style.cssText = 'font-size:14px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px dashed #eee;';
-        div.innerHTML = `
-            <div style="display:flex; justify-content:space-between;">
-                <span style="font-weight:600;">${item.qty}x ${item.name}</span>
-                <span>${formatBRL(item.totalPrice)}</span>
-            </div>
-            ${item.addons && item.addons.length > 0 ? `
-                <div class="small" style="color:var(--muted); margin-left: 10px; font-size:12px;">
-                    + ${((item.addons || [])).map(a => `${a.qty}x ${a.name}`).join(', ')}
+    if(hasOrder){
+        // Renderiza itens do cardápio
+        (order.items || []).forEach(item => {
+            const div = document.createElement('div');
+            div.style.cssText = 'font-size:14px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px dashed #eee;';
+            div.innerHTML = `
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="font-weight:600;">${item.qty}x ${item.name}</span>
+                    <span>${formatBRL(item.totalPrice)}</span>
                 </div>
-            ` : ''}
-        `;
-        itemsList.appendChild(div);
-    });
+                ${item.addons && item.addons.length > 0 ? `
+                    <div class="small" style="color:var(--muted); margin-left: 10px; font-size:12px;">
+                        + ${((item.addons || [])).map(a => `${a.qty}x ${a.name}`).join(', ')}
+                    </div>
+                ` : ''}
+            `;
+            itemsList.appendChild(div);
+        });
+        
+        // Exibe botões de itens e fechamento
+        document.querySelector("#tableDetailsAddItems").style.display = 'inline-block';
+        document.querySelector("#tableDetailsCloseTable").style.display = 'inline-block';
+        document.querySelector("#tableDetailsAddItems").textContent = 'Enviar Mais Itens';
+        document.querySelector("#tableDetailsCloseTable").textContent = 'Fechar Mesa';
+        document.querySelector("#tableDetailsTotal").textContent = formatBRL(order.total); // Total inicial dos itens
+        
+    } else {
+        itemsList.innerHTML = '<div class="small" style="color:var(--muted);">Nenhum item de cardápio adicionado.</div>';
+        // Se não tem orderId, o botão "Adicionar Itens" deve aparecer para criar o primeiro pedido
+        document.querySelector("#tableDetailsAddItems").style.display = 'inline-block';
+        document.querySelector("#tableDetailsAddItems").textContent = 'Adicionar Itens';
+        document.querySelector("#tableDetailsCloseTable").style.display = 'none'; // Não pode fechar se não tem pedido
+        document.querySelector("#tableDetailsTotal").textContent = formatBRL(0);
+    }
+    
+    // Renderiza comandas avulsas (sempre visível)
+    updateTableDetailsComandas();
 
     document.querySelector("#tableDetailsModal").classList.add('open');
 }
 
 function closeTableDetailsModal(){
-    const paymentMethod = document.querySelector("#tableDetailsPaymentMethod").value;
+    const paymentMethodElement = document.querySelector("#tableDetailsPaymentMethod");
+    const paymentMethod = paymentMethodElement ? paymentMethodElement.value : null;
     if(currentTableId){
         const table = (DATA.restaurant.tables || []).find(t => t.id === currentTableId);
         if(table && table.orderId){
@@ -2842,23 +4737,25 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelector("#tableDetailsAddItems").addEventListener("click", () => {
         if(!currentTableId) return;
         const table = (DATA.restaurant.tables || []).find(t => t.id === currentTableId);
-        if(!table || !table.orderId) {
-            alert("Erro: Não foi possível encontrar o pedido associado a esta mesa.");
-            return;
-        }
-        
+        if(!table) return;
+
         const tableIdToOpen = currentTableId;
-        const orderIdToOpen = table.orderId;
+        const orderIdToOpen = table.orderId || null; // Pode ser null se for o primeiro item
 
         closeTableDetailsModal();
         
-        // Abre o modal PDV no modo de adição de itens
+        // Abre o modal PDV no modo de adição de itens (ou criação de novo pedido)
         openPDVOrderModal(tableIdToOpen, orderIdToOpen);
     });
     
     document.querySelector("#tableDetailsCloseTable").addEventListener("click", () => {
         if(!currentTableId) return;
         closeTableAccount(currentTableId);
+    });
+    
+    document.querySelector("#tableDetailsAddComanda").addEventListener("click", () => {
+        if(!currentTableId) return;
+        openComandaChoiceModal(currentTableId);
     });
 });
 
@@ -2906,7 +4803,7 @@ function saveItemDetails(e){
     
     itemState.name = document.querySelector("#itemName").value;
     itemState.desc = document.querySelector("#itemDesc").value;
-    itemState.price = parseFloat(document.querySelector("#itemPrice").value);
+    itemState.price = parseFloat(document.querySelector("#itemPrice").value) || 0;
     itemState.category = document.querySelector("#itemCategory").value;
     
     if(isNew){
@@ -3366,13 +5263,36 @@ function renderAdminOrders(){
     }
     
     let totalDisplay = formatBRL(order.total);
+    
+    let discountInfo = '';
+    if (order.discount && order.discount > 0) {
+      discountInfo = `<b>Desconto (${order.couponCode}):</b> <span style="color:#28a745;">- ${formatBRL(order.discount)}</span><br>`;
+    }
+    
+    // NOVO: Exibe o tempo de preparo e ETA
+    let preparationInfo = '';
+    if (order.preparationTime && order.estimatedReadyTime) {
+      const readyTime = new Date(order.estimatedReadyTime);
+      const formattedTime = readyTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const now = new Date();
+      const minutesRemaining = Math.max(0, Math.floor((readyTime - now) / 60000));
+      
+      preparationInfo = `
+        <div style="background: #fff7e6; padding: 8px; border-radius: 6px; margin: 8px 0; border-left: 3px solid #ff9800;">
+          <b style="color: #ff9800;">⏱️ Tempo de Preparo:</b> ${order.preparationTime} min<br>
+          <span style="font-size: 12px; color: #663300;">Pronto às: ${formattedTime} (${minutesRemaining > 0 ? `faltam ${minutesRemaining} min` : 'já deveria estar pronto'})</span>
+        </div>
+      `;
+    }
 
     let detailsHTML = `
       <div class='order-details' style='margin-top:8px;font-size:13px;color:#444;'>
         <b>Cliente:</b> ${order.userName || "N/A"}<br>
         <b>Endereço:</b> ${order.address || "N/A"}<br>
         <b>Área de Entrega:</b> ${order.neighborhood || "N/A"}<br>
+        ${discountInfo}
         <b>Total:</b> R$ ${totalDisplay}<br>
+        ${preparationInfo}
         <hr style="border: 0; border-top: 1px dashed #ccc; margin: 5px 0;">
         ${itemsHTML}
         <hr style="border: 0; border-top: 1px dashed #ccc; margin: 5px 0;">
@@ -3386,6 +5306,7 @@ function renderAdminOrders(){
               </select>
             </div>
           <button style='background:#4caf50;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer;' onclick='event.stopPropagation(); printOrder("${order.id}")'>🖨️ Imprimir</button>
+          <button style='background:#9c27b0;color:#fff; padding: 5px 8px; border: none; border-radius: 5px; cursor: pointer;' onclick='event.stopPropagation(); showOrderTimeline("${order.id}")'>📜 Histórico</button>
         </div>
       </div>`;
 
@@ -3543,6 +5464,43 @@ window.renderSalesMetrics = function() {
   });
   const topArea = Object.entries(areaStats).sort(([, a], [, b]) => b.count - a.count)[0];
 
+  // NOVO: 4.6. Calcula Relatório de Motoboys
+  const motoboyStats = {};
+  filteredOrders.forEach(order => {
+    if (order.motoboyId && order.motoboyName) {
+      const id = order.motoboyId;
+      const name = order.motoboyName;
+      const total = order.total || 0;
+
+      if (!motoboyStats[id]) {
+        motoboyStats[id] = { name: name, count: 0, total: 0 };
+      }
+      motoboyStats[id].count += 1;
+      motoboyStats[id].total += total;
+    }
+  });
+
+  const motoboyReport = Object.values(motoboyStats)
+    .map(m => ({ ...m, avg: m.count > 0 ? m.total / m.count : 0 }))
+    .sort((a, b) => b.count - a.count); // Ordena por total de entregas
+
+  // NOVO: 4.5. Calcula Top Clientes
+  const customerStats = {};
+  filteredOrders.forEach(order => {
+    const customerId = order.userId || 'cliente_anonimo';
+    const customerName = order.userName || 'Cliente Anônimo';
+    if (!customerStats[customerId]) {
+      customerStats[customerId] = { name: customerName, count: 0, total: 0 };
+    }
+    customerStats[customerId].count += 1;
+    customerStats[customerId].total += (order.total || 0);
+  });
+
+  const topCustomers = Object.values(customerStats)
+    .map(c => ({ ...c, avg: c.count > 0 ? c.total / c.count : 0 }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+
   // 5. Renderiza Cards
   const cardCount = document.getElementById('cardCount');
   if (cardCount) cardCount.textContent = totalCount;
@@ -3552,6 +5510,47 @@ window.renderSalesMetrics = function() {
   if (cardRevenue) cardRevenue.textContent = formatBRL(totalSales); // Total de Vendas (Corrigido o ID)
   const cardTopArea = document.getElementById('cardTopArea');
   if (cardTopArea) cardTopArea.textContent = topArea ? topArea[0] : 'N/A';
+
+  // NOVO: 5.6. Renderiza Tabela Relatório de Motoboys
+  const tableMotoboyReportBody = document.querySelector('#tableMotoboyReport tbody');
+  if (tableMotoboyReportBody) {
+    tableMotoboyReportBody.innerHTML = '';
+    if (motoboyReport.length === 0) {
+        tableMotoboyReportBody.innerHTML = '<tr><td colspan="4" style="padding:8px;color:var(--muted);text-align:center;">Nenhum motoboy com entregas no período.</td></tr>';
+    } else {
+        motoboyReport.forEach(motoboy => {
+            tableMotoboyReportBody.innerHTML += `
+              <tr>
+                <td style="padding:8px;border-bottom:1px solid #eee">${motoboy.name}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee">${motoboy.count}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee">${formatBRL(motoboy.total)}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee">${formatBRL(motoboy.avg)}</td>
+              </tr>
+            `;
+        });
+    }
+  }
+
+  // NOVO: 5.5. Renderiza Tabela Top Clientes
+  const tableTopCustomersBody = document.querySelector('#tableTopCustomers tbody');
+  if (tableTopCustomersBody) {
+    tableTopCustomersBody.innerHTML = '';
+    if (topCustomers.length === 0) {
+        tableTopCustomersBody.innerHTML = '<tr><td colspan="5" style="padding:8px;color:var(--muted);text-align:center;">Nenhum cliente encontrado no período.</td></tr>';
+    } else {
+        topCustomers.forEach((customer, index) => {
+            tableTopCustomersBody.innerHTML += `
+              <tr>
+                <td style="padding:8px;border-bottom:1px solid #eee">${index + 1}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee">${customer.name}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee">${customer.count}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee">${formatBRL(customer.total)}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee">${formatBRL(customer.avg)}</td>
+              </tr>
+            `;
+        });
+    }
+  }
   
   // Garante que o botão ativo está com o estilo correto após a renderização
   document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
@@ -3601,6 +5600,86 @@ window.renderSalesMetrics = function() {
       </tr>
     `;
   });
+
+  // NOVO: 9. Calcula e Renderiza Gráfico de Picos de Horário
+  const peakHoursData = calculatePeakHours(filteredOrders);
+  renderPeakHoursChart(peakHoursData);
+}
+
+/**
+ * Calcula a quantidade de pedidos por hora do dia.
+ * @param {Array} orders - Lista de pedidos filtrados.
+ * @returns {Object} - { labels: Array, data: Array }
+ */
+function calculatePeakHours(orders) {
+    const hourlyCounts = new Array(24).fill(0); // 0 a 23 horas
+
+    orders.forEach(order => {
+        const date = new Date(order.createdAt);
+        const hour = date.getHours();
+        if (hour >= 0 && hour <= 23) {
+            hourlyCounts[hour]++;
+        }
+    });
+
+    const labels = hourlyCounts.map((_, index) => `${index}h`);
+    
+    return { labels: labels, data: hourlyCounts };
+}
+
+let peakHoursChartInstance = null;
+
+/**
+ * Renderiza o gráfico de picos de horário.
+ * @param {Object} data - Dados do gráfico.
+ */
+function renderPeakHoursChart(data) {
+    const chartCanvas = document.getElementById('peakHoursChart');
+    if (!chartCanvas) return;
+
+    const ctx = chartCanvas.getContext('2d');
+    if (!ctx) return;
+
+    if (peakHoursChartInstance) {
+        // Atualiza os dados do gráfico existente
+        peakHoursChartInstance.data.labels = data.labels;
+        peakHoursChartInstance.data.datasets[0].data = data.data;
+        peakHoursChartInstance.update();
+    } else {
+        // Cria um novo gráfico
+        peakHoursChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    label: 'Quantidade de Pedidos',
+                    data: data.data,
+                    backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Pedidos'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Hora do Dia'
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 let currentSalesPeriod = 'total'; // Variável global para o período de vendas
@@ -3641,6 +5720,7 @@ window.renderAdminDashboard = function() {
   const { labels, data } = calculateDailySales();
   
   renderSalesMetrics(); // Adicionado: Renderiza as métricas e tabelas
+  // O gráfico de picos de horário é renderizado dentro de renderSalesMetrics, que usa os pedidos filtrados.
 
   if (!salesChartInstance) {
     const chartCanvas = document.getElementById('salesChart');
@@ -3713,6 +5793,54 @@ function loadStoreSettings() {
     document.querySelector("#restaurantStatus").value = DATA.restaurant.status;
     document.querySelector("#currentLogoPreview").src = DATA.restaurant.logo || blankSVG();
     document.querySelector("#restaurantLogoUrl").value = DATA.restaurant.logo || "";
+    
+    // NOVO: Carregar tempo de preparo
+    document.querySelector("#preparationTime").value = DATA.restaurant.preparationTime || 30;
+    
+    // Carregar configurações de entrega por raio
+    document.querySelector("#useRadiusDelivery").checked = DATA.restaurant.useRadiusDelivery || false;
+    document.querySelector("#deliveryBaseFee").value = DATA.restaurant.deliveryBaseFee || 0;
+    document.querySelector("#deliveryFeePerKm").value = DATA.restaurant.deliveryFeePerKm || 0;
+    document.querySelector("#restaurantLat").value = DATA.restaurant.restaurantLat || 0;
+    document.querySelector("#restaurantLng").value = DATA.restaurant.restaurantLng || 0;
+    
+    renderCoupons();
+}
+
+// Função para geocodificar endereço usando LocationIQ (Mais precisa que Nominatim)
+async function geocodeNominatim(address) {
+    const LOCATIONIQ_TOKEN = "pk.5397f7129040e1f4b75902dabfe31805";
+    const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(address)}&format=json&limit=1`;
+
+    const response = await fetch(url);
+
+    const data = await response.json();
+    
+    // LocationIQ retorna um array vazio ou um objeto de erro
+    if (!Array.isArray(data) || !data.length) {
+        // Verifica se é um erro de API (ex: limite excedido)
+        if (data.error) {
+            throw new Error(`Erro na API LocationIQ: ${data.error}`);
+        }
+        throw new Error("Endereço não encontrado");
+    }
+
+    return {
+        lat: parseFloat(data[0].lat),
+        lng: parseFloat(data[0].lon)
+    };
+}
+
+// Função para calcular distância entre dois pontos usando fórmula de Haversine
+function calculateDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371; // Raio da Terra em km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distância em km
 }
 
 async function saveStoreSettings(e) {
@@ -3735,6 +5863,32 @@ async function saveStoreSettings(e) {
     DATA.restaurant.address = document.querySelector("#restaurantAddress").value;
     DATA.restaurant.status = document.querySelector("#restaurantStatus").value;
     DATA.restaurant.logo = newLogoUrl;
+    
+    // NOVO: Salvar tempo de preparo
+    DATA.restaurant.preparationTime = parseInt(document.querySelector("#preparationTime").value || "30");
+    
+    // Salvar configurações de entrega por raio
+    DATA.restaurant.useRadiusDelivery = document.querySelector("#useRadiusDelivery").checked;
+    DATA.restaurant.deliveryBaseFee = parseFloat(document.querySelector("#deliveryBaseFee").value || "0");
+    DATA.restaurant.deliveryFeePerKm = parseFloat(document.querySelector("#deliveryFeePerKm").value || "0");
+    
+    // Geocodificar endereço da loja se o modo raio estiver ativado
+    if (DATA.restaurant.useRadiusDelivery) {
+        try {
+            const coords = await geocodeNominatim(DATA.restaurant.address);
+            DATA.restaurant.restaurantLat = coords.lat;
+            DATA.restaurant.restaurantLng = coords.lng;
+            document.querySelector("#restaurantLat").value = coords.lat;
+            document.querySelector("#restaurantLng").value = coords.lng;
+        } catch (error) {
+            alert("Erro ao geocodificar o endereço da loja: " + error.message + ". Verifique o endereço e tente novamente.");
+            // Se houver erro, retorna para não salvar as configurações
+            return;
+        }
+    } else {
+        DATA.restaurant.restaurantLat = parseFloat(document.querySelector("#restaurantLat").value || "0");
+        DATA.restaurant.restaurantLng = parseFloat(document.querySelector("#restaurantLng").value || "0");
+    }
     
     // O deliveryAreas já foi atualizado via onchange/onclick
 
@@ -3795,6 +5949,269 @@ function updateDeliveryAreaProp(areaId, prop, value) {
   }
 }
 
+// --- Cupons de Desconto ---
+
+let appliedCoupon = null; // Armazena o cupom aplicado no checkout
+
+function renderCoupons() {
+  const list = document.querySelector("#couponsList");
+  list.innerHTML = '';
+  
+  if (!DATA.restaurant.coupons) {
+    DATA.restaurant.coupons = [];
+  }
+  
+  if (DATA.restaurant.coupons.length === 0) {
+    list.innerHTML = '<div class="item-management-note">Nenhum cupom cadastrado.</div>';
+    return;
+  }
+  
+  ((DATA.restaurant.coupons || [])).forEach((coupon) => {
+    const div = document.createElement('div');
+    div.classList.add('delivery-area-row');
+    
+    const typeLabel = coupon.type === 'percent' ? '%' : 'R$';
+    const statusLabel = coupon.active ? '✅ Ativo' : '❌ Inativo';
+    const expiryDate = new Date(coupon.expiresAt).toLocaleDateString('pt-BR');
+    
+    div.innerHTML = `
+      <div style="flex:1; padding:8px; background:#f9f9f9; border-radius:6px;">
+        <strong>${coupon.code}</strong> - ${coupon.value}${typeLabel} | Mín: ${formatBRL(coupon.minSubtotal)}<br>
+        <small>Expira: ${expiryDate} | Usos: ${coupon.usedCount || 0}/${coupon.maxUses} | ${statusLabel}</small>
+      </div>
+      <button type="button" class="pill" style="background:#dc3545; color:white;" 
+              onclick="removeCoupon('${coupon.id}')">Excluir</button>
+    `;
+    list.appendChild(div);
+  });
+}
+
+function openCouponModal(couponId = null) {
+  if (!isAdmin) return;
+  
+  const modal = document.querySelector("#couponModal");
+  const form = document.querySelector("#couponForm");
+  form.reset();
+  
+  if (couponId) {
+    const coupon = DATA.restaurant.coupons.find(c => c.id === couponId);
+    if (coupon) {
+      document.querySelector("#couponModalTitle").textContent = "Editar Cupom";
+      document.querySelector("#couponIdEdit").value = coupon.id;
+      document.querySelector("#couponCode").value = coupon.code;
+      document.querySelector("#couponType").value = coupon.type;
+      document.querySelector("#couponValue").value = coupon.value;
+      document.querySelector("#couponMinSubtotal").value = coupon.minSubtotal;
+      document.querySelector("#couponExpiresAt").value = coupon.expiresAt;
+      document.querySelector("#couponMaxUses").value = coupon.maxUses;
+      document.querySelector("#couponActive").checked = coupon.active;
+    }
+  } else {
+    document.querySelector("#couponModalTitle").textContent = "Criar Novo Cupom";
+    document.querySelector("#couponActive").checked = true;
+  }
+  
+  modal.classList.add('open');
+}
+
+function closeCouponModal() {
+  document.querySelector("#couponModal").classList.remove('open');
+  document.querySelector("#couponForm").reset();
+}
+
+async function saveCoupon(e) {
+  e.preventDefault();
+  if (!isAdmin) return;
+  
+  const couponId = document.querySelector("#couponIdEdit").value;
+  const code = document.querySelector("#couponCode").value.trim().toUpperCase();
+  const type = document.querySelector("#couponType").value;
+  const value = parseFloat(document.querySelector("#couponValue").value);
+  const minSubtotal = parseFloat(document.querySelector("#couponMinSubtotal").value);
+  const expiresAt = document.querySelector("#couponExpiresAt").value;
+  const maxUses = parseInt(document.querySelector("#couponMaxUses").value);
+  const active = document.querySelector("#couponActive").checked;
+  
+  // Validações
+  if (!code) {
+    alert("Código do cupom é obrigatório.");
+    return;
+  }
+  
+  if (value <= 0) {
+    alert("Valor do desconto deve ser maior que zero.");
+    return;
+  }
+  
+  if (type === 'percent' && value > 100) {
+    alert("Desconto percentual não pode ser maior que 100%.");
+    return;
+  }
+  
+  // Verifica duplicação de código
+  const existingCoupon = DATA.restaurant.coupons.find(c => c.code === code && c.id !== couponId);
+  if (existingCoupon) {
+    alert("Já existe um cupom com este código.");
+    return;
+  }
+  
+  if (couponId) {
+    // Editar cupom existente
+    const coupon = DATA.restaurant.coupons.find(c => c.id === couponId);
+    if (coupon) {
+      coupon.code = code;
+      coupon.type = type;
+      coupon.value = value;
+      coupon.minSubtotal = minSubtotal;
+      coupon.expiresAt = expiresAt;
+      coupon.maxUses = maxUses;
+      coupon.active = active;
+    }
+  } else {
+    // Criar novo cupom
+    const newCoupon = {
+      id: Date.now().toString(),
+      code: code,
+      type: type,
+      value: value,
+      minSubtotal: minSubtotal,
+      expiresAt: expiresAt,
+      maxUses: maxUses,
+      usedCount: 0,
+      active: active
+    };
+    DATA.restaurant.coupons.push(newCoupon);
+  }
+  
+  await saveMenuData();
+  renderCoupons();
+  closeCouponModal();
+  alert("Cupom salvo com sucesso!");
+}
+
+function removeCoupon(couponId) {
+  if (!isAdmin || !confirm("Tem certeza que deseja remover este cupom?")) return;
+  DATA.restaurant.coupons = ((DATA.restaurant.coupons || [])).filter(c => c.id !== couponId);
+  renderCoupons();
+}
+
+function applyCoupon() {
+  const code = document.querySelector("#checkoutCoupon").value.trim().toUpperCase();
+  const messageEl = document.querySelector("#couponMessage");
+  
+  if (!code) {
+    messageEl.textContent = "Digite um código de cupom.";
+    messageEl.style.color = "#dc3545";
+    return;
+  }
+  
+  const coupon = DATA.restaurant.coupons.find(c => c.code === code);
+  
+  if (!coupon) {
+    messageEl.textContent = "❌ Cupom inválido.";
+    messageEl.style.color = "#dc3545";
+    appliedCoupon = null;
+    updateCheckoutTotalWithCoupon();
+    return;
+  }
+  
+  if (!coupon.active) {
+    messageEl.textContent = "❌ Cupom inativo.";
+    messageEl.style.color = "#dc3545";
+    appliedCoupon = null;
+    updateCheckoutTotalWithCoupon();
+    return;
+  }
+  
+  const today = new Date().toISOString().split('T')[0];
+  if (coupon.expiresAt < today) {
+    messageEl.textContent = "❌ Cupom expirado.";
+    messageEl.style.color = "#dc3545";
+    appliedCoupon = null;
+    updateCheckoutTotalWithCoupon();
+    return;
+  }
+  
+  if (coupon.usedCount >= coupon.maxUses) {
+    messageEl.textContent = "❌ Limite de uso atingido.";
+    messageEl.style.color = "#dc3545";
+    appliedCoupon = null;
+    updateCheckoutTotalWithCoupon();
+    return;
+  }
+  
+  const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  
+  if (subtotal < coupon.minSubtotal) {
+    messageEl.textContent = `❌ Valor mínimo de ${formatBRL(coupon.minSubtotal)} não atingido.`;
+    messageEl.style.color = "#dc3545";
+    appliedCoupon = null;
+    updateCheckoutTotalWithCoupon();
+    return;
+  }
+  
+  // Cupom válido!
+  appliedCoupon = coupon;
+  messageEl.textContent = `✅ Cupom aplicado com sucesso!`;
+  messageEl.style.color = "#28a745";
+  updateCheckoutTotalWithCoupon();
+}
+
+function updateCheckoutTotalWithCoupon() {
+  let deliveryFee = 0;
+  let areaName = "N/A";
+  
+  // Verifica se o modo automático por raio está ativado
+  if (DATA.restaurant.useRadiusDelivery && window.autoDeliveryFee) {
+    deliveryFee = window.autoDeliveryFee;
+    areaName = window.autoDeliveryDistanceKm.toFixed(1) + " km";
+  } else {
+    const selectedOption = document.querySelector("#deliveryAreaSelect").options[document.querySelector("#deliveryAreaSelect").selectedIndex];
+    if (selectedOption && selectedOption.dataset.fee) {
+      deliveryFee = parseFloat(selectedOption.dataset.fee);
+      areaName = selectedOption.textContent.split('(')[0].trim();
+    }
+  }
+  
+  const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  let discount = 0;
+  
+  if (appliedCoupon) {
+    if (appliedCoupon.type === 'percent') {
+      discount = subtotal * (appliedCoupon.value / 100);
+    } else {
+      discount = appliedCoupon.value;
+    }
+    
+    // Garante que o desconto não seja maior que o subtotal
+    if (discount > subtotal) {
+      discount = subtotal;
+    }
+  }
+  
+  const total = subtotal - discount + deliveryFee;
+  
+  document.querySelector("#checkoutSubtotal").textContent = formatBRL(subtotal);
+  document.querySelector("#checkoutDeliveryFee").textContent = formatBRL(deliveryFee);
+  document.querySelector("#checkoutAreaName").textContent = areaName;
+  document.querySelector("#checkoutTotal").textContent = formatBRL(total);
+  
+  const discountRow = document.querySelector("#checkoutDiscountRow");
+  if (appliedCoupon && discount > 0) {
+    discountRow.style.display = 'flex';
+    discountRow.dataset.visible = 'true';
+    document.querySelector("#checkoutCouponCode").textContent = appliedCoupon.code;
+    document.querySelector("#checkoutDiscount").textContent = "- " + formatBRL(discount);
+  } else {
+    discountRow.style.display = 'none';
+    discountRow.dataset.visible = 'false';
+  }
+  
+  if (total > 0) {
+    document.querySelector("#checkoutSubmit").removeAttribute('disabled');
+  }
+}
+
 // --- Checkout Modal ---
 
 function openCheckoutModal(){
@@ -3816,6 +6233,17 @@ function openCheckoutModal(){
     renderCheckoutDeliveryAreas();
     renderCheckoutSavedAddresses();
     
+    // Oculta ou mostra o seletor de área de entrega baseado no modo
+    const deliveryAreaSelect = document.querySelector("#deliveryAreaSelect");
+    const deliveryAreaGroup = deliveryAreaSelect.closest('.form-group');
+    if (DATA.restaurant.useRadiusDelivery) {
+      deliveryAreaGroup.style.display = 'none';
+      deliveryAreaSelect.removeAttribute('required');
+    } else {
+      deliveryAreaGroup.style.display = 'block';
+      deliveryAreaSelect.setAttribute('required', 'required');
+    }
+    
     // Tenta preencher o endereço com o primeiro salvo se houver
     if (currentUser.savedAddresses && currentUser.savedAddresses.length > 0) {
       document.querySelector("#checkoutAddress").value = currentUser.savedAddresses[0];
@@ -3823,6 +6251,10 @@ function openCheckoutModal(){
     } else {
       document.querySelector("#checkoutAddress").value = '';
     }
+    
+    // Limpa valores automáticos anteriores
+    window.autoDeliveryFee = null;
+    window.autoDeliveryDistanceKm = null;
     
     // Recalcula o total (inicialmente com 0 de taxa)
     updateCheckoutTotal(0, "N/A");
@@ -3833,6 +6265,9 @@ function openCheckoutModal(){
 function closeCheckoutModal(){
     document.querySelector("#checkoutModal").classList.remove('open');
     document.querySelector("#checkoutForm").reset();
+    appliedCoupon = null;
+    document.querySelector("#couponMessage").textContent = '';
+    document.querySelector("#checkoutDiscountRow").style.display = 'none';
 }
 
 function renderCheckoutCartSummary() {
@@ -3906,14 +6341,7 @@ function renderCheckoutSavedAddresses() {
 
 
 function updateCheckoutTotal(deliveryFee, areaName) {
-    const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
-    const total = subtotal + deliveryFee;
-    
-    document.querySelector("#checkoutSubtotal").textContent = formatBRL(subtotal);
-    document.querySelector("#checkoutDeliveryFee").textContent = formatBRL(deliveryFee);
-    document.querySelector("#checkoutAreaName").textContent = areaName;
-    document.querySelector("#checkoutTotal").textContent = formatBRL(total);
-    document.querySelector("#checkoutSubmit").removeAttribute('disabled');
+    updateCheckoutTotalWithCoupon();
 }
 
 
@@ -3942,12 +6370,42 @@ function showConfirmationModal(order) {
   });
 
   // Totais
+  let discountHTML = '';
+  if (order.discount && order.discount > 0) {
+    discountHTML = `
+      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; color:#28a745;">
+        <span>Desconto (${order.couponCode}):</span>
+        <span>- ${formatBRL(order.discount)}</span>
+      </div>
+    `;
+  }
+  
+  // NOVO: Formata o tempo estimado de preparo
+  let preparationHTML = '';
+  if (order.preparationTime && order.estimatedReadyTime) {
+    const readyTime = new Date(order.estimatedReadyTime);
+    const formattedTime = readyTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    preparationHTML = `
+      <div style="background: #fff7e6; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #ff9800;">
+        <div style="font-weight: 700; color: #ff9800; margin-bottom: 4px;">⏱️ Tempo de Preparo</div>
+        <div style="font-size: 14px; color: #663300;">
+          Seu pedido ficará pronto em aproximadamente <strong>${order.preparationTime} minutos</strong>
+        </div>
+        <div style="font-size: 12px; color: var(--muted); margin-top: 4px;">
+          Previsão: ${formattedTime}
+        </div>
+      </div>
+    `;
+  }
+  
   summary.innerHTML += `
+      ${preparationHTML}
       <div style="border-top:1px solid #eee; margin-top: 8px; padding-top: 8px;">
           <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
             <span>Subtotal:</span>
             <span>${formatBRL(order.subtotal)}</span>
           </div>
+          ${discountHTML}
           <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
             <span>Taxa de Entrega (${order.deliveryAreaName}):</span>
             <span>${formatBRL(order.deliveryFee)}</span>
@@ -4017,6 +6475,47 @@ function initListeners(){
   document.querySelector("#checkoutSavedAddresses").addEventListener('change', (e) => {
     document.querySelector("#checkoutAddress").value = e.target.value;
   });
+  
+  // Cálculo automático de taxa por raio ao digitar endereço
+  let addressTimeout;
+  document.querySelector("#checkoutAddress").addEventListener('input', (e) => {
+    clearTimeout(addressTimeout);
+    addressTimeout = setTimeout(async () => {
+      const address = e.target.value.trim();
+      
+      // Só calcula se o modo raio estiver ativado e houver endereço
+      if (!DATA.restaurant.useRadiusDelivery || !address || address.length < 10) {
+        return;
+      }
+      
+      try {
+        // Geocodificar endereço do cliente
+        const clientCoords = await geocodeNominatim(address);
+        
+        // Calcular distância
+        const distance = calculateDistance(
+          DATA.restaurant.restaurantLat,
+          DATA.restaurant.restaurantLng,
+          clientCoords.lat,
+          clientCoords.lng
+        );
+        
+        // Calcular taxa
+        const fee = DATA.restaurant.deliveryBaseFee + (distance * DATA.restaurant.deliveryFeePerKm);
+        
+        // Armazenar valores globais
+        window.autoDeliveryFee = fee;
+        window.autoDeliveryDistanceKm = distance;
+        
+        // Atualizar total do checkout
+        updateCheckoutTotal(fee, distance.toFixed(1) + " km");
+        
+      } catch (error) {
+        console.warn("Erro ao calcular taxa automática:", error.message);
+        // Não mostra alerta para não incomodar o usuário enquanto digita
+      }
+    }, 1500); // Aguarda 1.5s após o usuário parar de digitar
+  });
 
   // --- Modals de Admin ---
   document.querySelector("#btnAdminPanel").addEventListener("click", () => openAdminModal('orders'));
@@ -4031,6 +6530,12 @@ function initListeners(){
   // Formulário de Configurações da Loja
   document.querySelector("#storeSettingsForm").addEventListener("submit", saveStoreSettings);
   document.querySelector("#btnAddDeliveryArea").addEventListener("click", addDeliveryArea);
+  
+  // Cupons de Desconto
+  document.querySelector("#btnAddCoupon").addEventListener("click", openCouponModal);
+  document.querySelector("#couponForm").addEventListener("submit", saveCoupon);
+  document.querySelector("#couponCancel").addEventListener("click", closeCouponModal);
+  document.querySelector("#applyCouponBtn").addEventListener("click", applyCoupon);
 
   // Preview do logo
   document.querySelector("#restaurantLogoFile").addEventListener("change", (e) => {
@@ -4174,6 +6679,7 @@ function initListeners(){
   document.querySelector("#checkoutModal").addEventListener("click", (e) => { if(e.target.id === "checkoutModal"){ closeCheckoutModal(); } });
   document.querySelector("#adminModal").addEventListener("click", (e) => { if(e.target.id === "adminModal"){ closeAdminModal(); } });
   document.querySelector("#confirmationModal").addEventListener("click", (e) => { if(e.target.id === "confirmationModal"){ closeConfirmationModal(); } });
+  document.querySelector("#couponModal").addEventListener("click", (e) => { if(e.target.id === "couponModal"){ closeCouponModal(); } });
   document.querySelector("#closeConfirmationModal").addEventListener("click", closeConfirmationModal);
 }
 
@@ -4198,6 +6704,7 @@ window.removeAddonItem = removeAddonItem;
 window.updateAddonGroupProp = updateAddonGroupProp;
 window.updateAddonItemProp = updateAddonItemProp;
 window.removeDeliveryArea = removeDeliveryArea;
+
 window.editCategory = editCategory;
 window.removeCategory = removeCategory;
 
@@ -4222,8 +6729,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const action = button.dataset.action;
 
         if (action === "show-details") {
+            // Se a mesa estiver ocupada, abre o modal de detalhes.
+            // Se estiver livre, abre o modal de detalhes para adicionar a primeira comanda avulsa ou item.
             openTableDetailsModal(tableId);
         } else if (action === "open-comanda") {
+            // Este bloco não é mais necessário, pois o show-details cobre ambos os casos
             openPDVOrderModal(tableId);
         }
     });
@@ -4257,11 +6767,9 @@ function renderPDVTables(){
         
         let html = `<strong style="display:block;margin-bottom:6px">${table.name || 'Mesa'}</strong><small style="color:${color}">Status: ${status.toUpperCase()}</small>`;
         
-        if(isOccupied){
-            html += `<button class=\"btn\" style=\"margin-top:10px; padding: 8px 12px; font-size: 14px; background: var(--primary);\" data-action=\"show-details\" data-table-id=\"${table.id}\">Pedidos</button>`;
-        } else {
-            html += `<button class=\"btn\" style=\"margin-top:10px; padding: 8px 12px; font-size: 14px; background: #007bff;\" data-action=\"open-comanda\" data-table-id=\"${table.id}\">Abrir Comanda</button>`;
-        }
+        // Se a mesa estiver ocupada, mostra "Pedidos", senão mostra "Abrir Comanda"
+        // O botão "Pedidos" agora abre o modal de detalhes, que permite adicionar itens ou comandas
+        html += `<button class=\"btn\" style=\"margin-top:10px; padding: 8px 12px; font-size: 14px; background: var(--primary);\" data-action=\"show-details\" data-table-id=\"${table.id}\">${isOccupied ? 'Pedidos' : 'Abrir Comanda'}</button>`;
         
         div.innerHTML = html;
         grid.appendChild(div);
@@ -4297,10 +6805,12 @@ function openPDVOrderModal(tableId, existingOrderId = null){
     if(!table) return;
     
     // Se a mesa já tem um pedido, abre o modal de detalhes, não o de novo pedido, a menos que seja para adicionar itens
-    if(table.orderId && !existingOrderId){
-        openTableDetailsModal(tableId);
-        return;
-    }
+        // Se a mesa já tem um pedido, abre o modal de detalhes, não o de novo pedido, a menos que seja para adicionar itens
+        // A lógica de adicionar itens a um pedido existente será tratada dentro do modal de detalhes.
+        if(table.orderId && !existingOrderId){
+            openTableDetailsModal(tableId);
+            return;
+        }
     
     pdvCartState = { tableId: table.id, items: [], existingOrderId: existingOrderId };
     document.querySelector("#pdvOrderTitle").textContent = 'Pedido — ' + (table.name || 'Mesa');
@@ -4327,7 +6837,7 @@ function openPDVOrderModal(tableId, existingOrderId = null){
         const btn = document.createElement('button');
         btn.className = 'pill';
         btn.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:6px;';
-        btn.textContent = `${item.name} — ${formatBRL(item.totalPrice / item.qty)}`;
+        btn.textContent = `${item.name} — ${formatBRL(item.price)}`;
         btn.addEventListener('click', () => {
             // No modo PDV, ao clicar no item, abre o modal de adicionais
             // O modal de adicionais precisa saber que está no modo PDV
@@ -4389,6 +6899,15 @@ function closePDVOrderModal(){
     pdvCartState.existingOrderId = null; // Limpa o estado de adição de itens
 }
 
+// Função auxiliar para fechar os modais de comanda e restaurar o z-index
+function closeComandaModals() {
+    document.querySelector("#comandaChoiceModal").classList.remove('open');
+    document.querySelector("#comandaModal").classList.remove('open');
+    document.querySelector("#comandaPesoModal").classList.remove('open');
+    document.querySelector("#comandaChoiceModal").style.zIndex = '';
+    document.querySelector("#comandaModal").style.zIndex = '';
+    document.querySelector("#comandaPesoModal").style.zIndex = '';
+}
 
 // === PDV Checkout: abre resumo antes de enviar para cozinha ===
 function formatLinePrice(qty, name, price) {
@@ -4927,6 +7446,34 @@ window.printOrder = function(orderId) {
     }
     return itemHtml;
   }).join('');
+  
+  // Geração da lista de comandas avulsas
+  let comandasAvulsasHtml = '';
+  let totalComandas = 0;
+  if (order.comandasAvulsas && order.comandasAvulsas.length > 0) {
+    comandasAvulsasHtml = '<div class="line"></div><div class="bold">Comandas Avulsas:</div>';
+    order.comandasAvulsas.forEach(comanda => {
+      totalComandas += comanda.totalCalculado || 0;
+      let detalhes = '';
+      if (comanda.tipo === 'valor') {
+        detalhes = `Valor Fixo`;
+      } else if (comanda.tipo === 'peso') {
+        detalhes = `${comanda.peso}kg x ${formatBRL(comanda.valorKg)}/kg`;
+      }
+      const pagamentoLabel = {
+        'pix': 'PIX',
+        'credit': 'Crédito',
+        'debit': 'Débito',
+        'cash': 'Dinheiro'
+      }[comanda.pagamento] || comanda.pagamento;
+      
+      comandasAvulsasHtml += `<div class="footer-line"><span>${comanda.cliente} (${detalhes})</span><span>${formatBRL(comanda.totalCalculado)}</span></div>`;
+      comandasAvulsasHtml += `<div class="item-addon">Pagamento: ${pagamentoLabel}${comanda.cpf ? ' | CPF: ' + comanda.cpf : ''}</div>`;
+    });
+  }
+  
+  // Total geral incluindo comandas
+  const totalGeral = (order.totalGeral !== undefined) ? order.totalGeral : (total + totalComandas);
 
   const printContent = `
     <html>
@@ -4956,6 +7503,7 @@ window.printOrder = function(orderId) {
 <div class="line"></div>
 <div class="bold">Itens:</div>
 <div class="items-list">${itemsList}</div>
+${comandasAvulsasHtml}
 <div class="line"></div>
 <div class="bold">Cliente</div>
 
@@ -4972,9 +7520,30 @@ Forma de Pagamento: ${paymentMethod}
 <div class="line"></div>
 <div class="footer-line"><span>Subtotal:</span><span>${formatBRL(subtotal)}</span></div>
 <div class="footer-line"><span>Taxa de entrega:</span><span>${formatBRL(deliveryFee)}</span></div>
-<div class="footer-line"><span>Total:</span><span>${formatBRL(total)}</span></div>
+${totalComandas > 0 ? `<div class="footer-line"><span>Comandas Avulsas:</span><span>${formatBRL(totalComandas)}</span></div>` : ''}
+<div class="footer-line"><span>Total:</span><span>${formatBRL(totalGeral)}</span></div>
 <div class="line"></div>
-      </body>
+      
+<!-- ========================================================================= -->
+<!-- === MODAL DE HISTÓRICO DE PEDIDOS (CRM) === -->
+<!-- ========================================================================= -->
+<div id="orderHistoryModal" class="modal">
+  <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
+    <div class="modal-header">
+      <h2 id="historyModalTitle">Histórico de Pedidos</h2>
+      <span class="close-button" onclick="closeOrderHistoryModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <p id="historyClientInfo" style="margin-bottom: 15px; font-weight: 600;"></p>
+      <div id="historyOrdersList">
+        <!-- Pedidos serão injetados aqui -->
+        <p style="color:#888;">Carregando histórico...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
     </html>
   `;
 
@@ -5113,7 +7682,29 @@ document.addEventListener("DOMContentLoaded", () => {
     return Object.values(counts).sort((a,b)=>b.qty-a.qty).slice(0,limit);
   }
 
-  function calcPayments(filtered){
+  function calcPaymentsWithTotal(filtered){
+    const map = {};
+    let grandTotal = 0;
+
+    filtered.forEach(o => {
+      const pm = o.paymentMethod || "unknown";
+      const orderTotal = parseFloat(o.total) || parseFloat(o.subtotal) || parseFloat(o.totalPrice) || 0;
+      
+      map[pm] = map[pm] || { count: 0, total: 0 };
+      map[pm].count += 1;
+      map[pm].total += orderTotal;
+      grandTotal += orderTotal;
+    });
+
+    return Object.entries(map).map(([k,v]) => ({ 
+      method: k, 
+      count: v.count, 
+      total: v.total, 
+      pct: grandTotal > 0 ? ((v.total / grandTotal) * 100).toFixed(2) : 0 
+    })).sort((a,b)=>b.total-a.total);
+  }
+
+function calcPayments(filtered){
     const map = {};
     filtered.forEach(o => {
       const pm = o.paymentMethod || "unknown";
@@ -5159,21 +7750,22 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function renderPayments(list){
-    const tbody = document.querySelector("#tablePayments tbody");
-    tbody.innerHTML = "";
-    if(list.length === 0){
-      tbody.innerHTML = '<tr><td colspan="3" style="padding:8px;color:var(--muted)">Nenhuma forma de pagamento encontrada.</td></tr>';
-      return;
-    }
-    list.forEach(p => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td style="padding:8px;border-bottom:1px solid #f1f1f1">${p.method}</td>
-                      <td style="padding:8px;border-bottom:1px solid #f1f1f1">${p.count}</td>
-                      <td style="padding:8px;border-bottom:1px solid #f1f1f1">${p.pct}%</td>`;
-      tbody.appendChild(tr);
-    });
-  }
+function renderPayments(list){
+	    const tbody = document.querySelector("#tablePayments tbody");
+	    tbody.innerHTML = "";
+	    if(list.length === 0){
+	      tbody.innerHTML = '<tr><td colspan="4" style="padding:8px;color:var(--muted)">Nenhuma forma de pagamento encontrada.</td></tr>';
+	      return;
+	    }
+	    list.forEach(p => {
+	      const tr = document.createElement("tr");
+	      tr.innerHTML = `<td style="padding:8px;border-bottom:1px solid #f1f1f1">${p.method}</td>
+	                      <td style="padding:8px;border-bottom:1px solid #f1f1f1">${p.count}</td>
+	                      <td style="padding:8px;border-bottom:1px solid #f1f1f1">${formatBRL(p.total)}</td>
+	                      <td style="padding:8px;border-bottom:1px solid #f1f1f1">${p.pct}%</td>`;
+	      tbody.appendChild(tr);
+	    });
+	  }
 
   function renderAreas(list){
     const tbody = document.querySelector("#tableAreas tbody");
@@ -5196,7 +7788,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const filtered = getFilteredOrders(period);
     const summary = calcSummary(filtered);
     const topProducts = calcTopProducts(filtered, 10);
-    const payments = calcPayments(filtered);
+    const payments = calcPaymentsWithTotal(filtered);
     const areas = calcAreas(filtered);
 
     renderSummaryCards(summary);
@@ -5221,8 +7813,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Re-render when the admin modal is open and orders update: hook into existing re-render flow
     const origRenderAdminDashboard = window.renderAdminDashboard;
-    window.renderAdminDashboard = function(...args){
-      try{ if (typeof origRenderAdminDashboard === "function") origRenderAdminDashboard.apply(this,args); }catch(e){}
+window.renderAdminDashboard = function(...args){
+	      try{ if (typeof origRenderAdminDashboard === "function") origRenderAdminDashboard.apply(this,args); }catch(e){}
+	      // Chama o novo dashboard de motoboys
+	      renderMotoboyDashboard();
       // determine active period
       const activeBtn = document.querySelector(".period-btn.active");
       const period = activeBtn ? activeBtn.dataset.period : "day";
@@ -5319,7 +7913,29 @@ safeInit();
     return Object.values(counts).sort((a,b)=>b.qty-a.qty).slice(0,limit);
   }
 
-  function calcPayments(filtered){
+  function calcPaymentsWithTotal(filtered){
+    const map = {};
+    let grandTotal = 0;
+
+    filtered.forEach(o => {
+      const pm = o.paymentMethod || "unknown";
+      const orderTotal = parseFloat(o.total) || parseFloat(o.subtotal) || parseFloat(o.totalPrice) || 0;
+      
+      map[pm] = map[pm] || { count: 0, total: 0 };
+      map[pm].count += 1;
+      map[pm].total += orderTotal;
+      grandTotal += orderTotal;
+    });
+
+    return Object.entries(map).map(([k,v]) => ({ 
+      method: k, 
+      count: v.count, 
+      total: v.total, 
+      pct: grandTotal > 0 ? ((v.total / grandTotal) * 100).toFixed(2) : 0 
+    })).sort((a,b)=>b.total-a.total);
+  }
+
+function calcPayments(filtered){
     const map = {};
     filtered.forEach(o => {
       const pm = o.paymentMethod || o.payment || "unknown";
@@ -5409,7 +8025,7 @@ safeInit();
     const filtered = getFilteredOrders(period);
     const summary = calcSummary(filtered);
     const topProducts = calcTopProducts(filtered, 10);
-    const payments = calcPayments(filtered);
+    const payments = calcPaymentsWithTotal(filtered);
     const areas = calcAreas(filtered);
 
     renderSummaryCards(summary);
@@ -5462,6 +8078,7 @@ document.getElementById("tabMotoboys")?.addEventListener("click", () => {
   document.querySelectorAll(".admin-tabs button").forEach(b => b.classList.remove("active"));
   document.getElementById("tabMotoboys")?.classList.add("active");
   renderMotoboys();
+  renderMotoboyDashboard();
 });
 document.getElementById("tabCustomers").addEventListener("click", () => {
   document.querySelectorAll(".admin-panel").forEach(p => p.classList.add("hidden"));
@@ -5470,6 +8087,26 @@ document.getElementById("tabCustomers").addEventListener("click", () => {
 });
 
 </script>
+
+
+<!-- ========================================================================= -->
+<!-- === MODAL DE HISTÓRICO DE PEDIDOS (CRM) === -->
+<!-- ========================================================================= -->
+<div id="orderHistoryModal" class="modal">
+  <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
+    <div class="modal-header">
+      <h2 id="historyModalTitle">Histórico de Pedidos</h2>
+      <span class="close-button" onclick="closeOrderHistoryModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <p id="historyClientInfo" style="margin-bottom: 15px; font-weight: 600;"></p>
+      <div id="historyOrdersList">
+        <!-- Pedidos serão injetados aqui -->
+        <p style="color:#888;">Carregando histórico...</p>
+      </div>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
@@ -5508,6 +8145,11 @@ document.getElementById("tabCustomers").addEventListener("click", () => {
           <!-- Itens do pedido serão renderizados aqui -->
         </div>
         
+        <h4 style="margin-top:16px;">Comandas Avulsas da Mesa</h4>
+        <div id="tableDetailsComandasAvulsas" style="max-height:200px; overflow-y:auto; border:1px solid #eee; border-radius:8px; padding:8px; margin-bottom:16px;">
+          <!-- Comandas avulsas serão renderizadas aqui -->
+        </div>
+        
         <div style="display:flex; justify-content:space-between; font-weight:600; border-top:1px solid #eee; padding-top:8px;">
           <span>Total Atual:</span>
           <span id="tableDetailsTotal" style="color:var(--primary);">R$ 0,00</span>
@@ -5515,6 +8157,7 @@ document.getElementById("tabCustomers").addEventListener("click", () => {
         
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
           <button type="button" id="tableDetailsCancel" class="pill">Voltar</button>
+          <button type="button" id="tableDetailsAddComanda" class="btn" style="background:#28a745;">+ Comanda Avulsa</button>
           <button type="button" id="tableDetailsAddItems" class="btn" style="background:#007bff;">Enviar Mais Itens</button>
           <button type="button" id="tableDetailsCloseTable" class="btn" style="background:#dc3545;">Fechar Mesa</button>
         </div>
@@ -5585,19 +8228,18 @@ document.getElementById("tabCustomers").addEventListener("click", () => {
         </form>
       </div>
     </div>
-
-
-
+  </div>
+</div>
 
 <script>
 // INÍCIO: Lógica de Motoboy (Adicionado para corrigir o seletor)
 let motoboys = []; 
-const motoboysCollectionRef = collection(db, "motoboys");
 
 async function loadMotoboys() {
+  const motoboysCollectionRef = collection(db, "motoboys");
   try {
     const snap = await getDocs(motoboysCollectionRef);
-    motoboys = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    motoboys = snap.docs.map(d => ({ id: d.id, status: "offline", entregasHoje: 0, ...d.data() })); // Adiciona status e entregasHoje como padrão
     renderMotoboysList();
   } catch (e) {
     console.error("Erro ao carregar motoboys:", e);
@@ -5655,7 +8297,7 @@ document.getElementById('motoboyForm')?.addEventListener('submit', async (e) => 
   if(!name){ alert('Informe o nome do motoboy'); return; }
 
   try {
-    await addDoc(motoboysCollectionRef, { name, phone, createdAt: Date.now() });
+    await addDoc(motoboysCollectionRef, { name, phone, createdAt: Date.now(), status: "offline", entregasHoje: 0 });
     document.getElementById('motoboyForm').reset();
     document.getElementById('motoboyModal').classList.remove('open');
     loadMotoboys();
