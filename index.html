@@ -8,18 +8,852 @@
 <script>
 let salesChartInstance = null; // Variável global para a instância do Chart.js
 
+// === FUNÇÃO AUXILIAR DE FORMATAÇÃO MONETÁRIA ===
+const formatBRL = v => "R$ " + (v || 0).toFixed(2).replace(".",",");
+
+
+
 // Solicita permissão de notificação ao carregar a página
 document.addEventListener("DOMContentLoaded", () => {
     if (typeof Notification !== 'undefined' && Notification.permission !== "granted" && Notification.permission !== "denied") {
         Notification.requestPermission();
     }
+    // Carrega configuração de cupons inteligentes
+    loadSmartCouponConfig();
 });
 
 // ==== Funções Auxiliares ====
+
+/* =========================================================================
+   === NOVO RECURSO: HISTÓRICO E FIDELIDADE DO CLIENTE (LOYALTY) ===
+   ========================================================================= */
+
+// [NOVOS CRITÉRIOS]
+const POINTS_PER_ORDER = 100; // Pontos por pedido
+const MIN_ORDERS_FOR_DISCOUNT = 10; // Mínimo de pedidos para 10% OFF
+const DISCOUNT_PERCENTAGE = 0.10; // 10% de desconto
+const MIN_SUBTOTAL_FOR_DISCOUNT = 50.00; // Valor mínimo do subtotal para aplicar o desconto
+
+/* =========================================================================
+   === NOVO RECURSO: CUPOM INTELIGENTE (SMART COUPON RULES) ===
+   ========================================================================= */
+
+// [ESTRUTURA DE DADOS CONFIGURÁVEL] - Agora gerenciável pelo Admin
+let SMART_COUPON_CONFIG = {
+  inactivity: {
+    enabled: true,
+    days: 60,
+    code: 'VOLTE15',
+    type: 'percentage',
+    value: 0.15,
+    description: '15% OFF - Sentimos sua falta!',
+    priority: 1,
+    minSubtotal: 0,
+    validityDays: 30,
+    maxUsesPerClient: 1
+  },
+  area: {
+    enabled: true,
+    rules: [
+      {
+        id: 'area-001',
+        areaName: 'Vila Velha',
+        code: 'FRETEVV',
+        type: 'fixed',
+        value: 15.00,
+        description: 'R$ 15 OFF - Frete subsidiado para Vila Velha',
+        priority: 2,
+        enabled: true
+      }
+    ]
+  },
+  product: {
+    enabled: true,
+    percentage: 0.20,
+    minPurchases: 3,
+    priority: 3,
+    codeFormat: 'VIP-{PRODUCT}',
+    validityDays: 30
+  },
+  advanced: {
+    allowCombineWithManual: false,
+    allowCombineWithLoyalty: true,
+    notifyInProfile: true,
+    trackUsage: true
+  }
+};
+
+// [HISTÓRICO DE CUPONS GERADOS]
+let SMART_COUPON_HISTORY = [];
+
+// [COMPATIBILIDADE] - Mantém constantes antigas para não quebrar código existente
+const COUPON_INACTIVITY_DAYS = () => SMART_COUPON_CONFIG.inactivity.days;
+const INACTIVITY_COUPON = () => SMART_COUPON_CONFIG.inactivity;
+const AREA_COUPON_RULES = () => SMART_COUPON_CONFIG.area.rules.filter(r => r.enabled);
+const PRODUCT_COUPON_PERCENTAGE = () => SMART_COUPON_CONFIG.product.percentage;
+const PRODUCT_COUPON_PRIORITY = () => SMART_COUPON_CONFIG.product.priority;
+
+/**
+ * [FUNÇÃO NOVA] Define o Nível de Fidelidade com base na pontuação.
+ * @param {number} points - Pontuação total do cliente.
+ * @returns {{level: string, color: string}}
+ */
+function getLoyaltyLevel(points) {
+    if (points >= 3000) {
+        return { level: '💎 Nível OURO', color: '#ffc107' }; // Dourado
+    } else if (points >= 1000) {
+        return { level: '🥈 Nível PRATA', color: '#adb5bd' }; // Prata
+    } else if (points >= 100) {
+        return { level: '🥉 Nível BRONZE', color: '#cd7f32' }; // Bronze
+    } else {
+        return { level: '⭐ Novo Cliente', color: '#007bff' };
+    }
+}
+
+/**
+ * [FUNÇÃO NOVA] Calcula as métricas de fidelidade (pontuação, nível, benefício).
+ * @param {Object} clientData - Dados do cliente, **deve** incluir totalOrders.
+ * @returns {Object} - Dados de fidelidade.
+ */
+function calculateLoyaltyMetrics(clientData) {
+    const totalOrders = clientData.totalOrders || 0;
+    const points = totalOrders * POINTS_PER_ORDER;
+    const { level, color } = getLoyaltyLevel(points);
+    
+    // Benefício: 10% off automático após 10 pedidos
+    const hasDiscountBenefit = totalOrders >= MIN_ORDERS_FOR_DISCOUNT;
+    const benefitText = hasDiscountBenefit 
+        ? `✅ 10% OFF em pedidos acima de ${formatBRL(MIN_SUBTOTAL_FOR_DISCOUNT)}`
+        : `❌ Desconto automático (faltam ${Math.max(0, MIN_ORDERS_FOR_DISCOUNT - totalOrders)} pedidos)`;
+
+    return {
+        loyaltyPoints: points,
+        loyaltyLevel: level,
+        loyaltyLevelColor: color,
+        hasDiscountBenefit: hasDiscountBenefit,
+        loyaltyBenefitText: benefitText,
+    };
+}
+
+/**
+ * [FUNÇÃO NOVA] Adiciona o painel de fidelidade no Perfil do Cliente (Client Profile).
+ * @param {Object} metrics - As métricas padrão calculadas por calculateClientMetrics.
+ */
+function renderClientLoyaltyPanel(metrics) {
+    const totalOrders = metrics.totalOrders || 0;
+    const loyaltyMetrics = calculateLoyaltyMetrics({ totalOrders }); 
+    
+    const loyaltyPanel = document.getElementById("clientLoyaltyPanel");
+    if (!loyaltyPanel) return;
+
+    loyaltyPanel.innerHTML = `
+        <h5 style="margin-top: 20px; margin-bottom: 10px; color: var(--primary);">Programa de Fidelidade</h5>
+        <div style="background: #f7f7f7; padding: 15px; border-radius: 10px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span>Seu Nível:</span>
+                <span style="font-weight: bold; color: ${loyaltyMetrics.loyaltyLevelColor};">${loyaltyMetrics.loyaltyLevel}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span>Pontos Acumulados:</span>
+                <span style="font-weight: bold;">${loyaltyMetrics.loyaltyPoints} pts</span>
+            </div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ddd;">
+                <span style="font-weight: 600;">Benefício Atual:</span>
+                <p style="margin: 4px 0 0; font-size: 13px; color: ${loyaltyMetrics.hasDiscountBenefit ? '#28a745' : '#dc3545'};">
+                    ${loyaltyMetrics.loyaltyBenefitText}
+                </p>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * [FUNÇÃO NOVA] Gera o HTML do badge de fidelidade para o cartão do cliente no Admin.
+ * @param {Object} clientData - Dados do cliente.
+ * @returns {string} - HTML adicional para o card.
+ */
+function renderLoyaltyBadge(clientData) {
+    const metrics = calculateLoyaltyMetrics(clientData);
+    
+    return `
+        <div style="font-size:12px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #eee;">
+            Fidelidade: 
+            <span style="font-weight:bold; color: ${metrics.loyaltyLevelColor};">
+                ${metrics.loyaltyLevel}
+            </span> 
+            (${metrics.loyaltyPoints} pts)
+        </div>
+    `;
+}
+
+/**
+ * [FUNÇÃO NOVA] Calcula o valor do desconto de fidelidade.
+ * @param {number} subtotal - O subtotal do pedido antes do desconto.
+ * @param {number} totalOrders - O número total de pedidos do cliente atual.
+ * @returns {{discountValue: number, discountApplied: boolean, reason: string}}
+ */
+function calculateLoyaltyDiscount(subtotal, totalOrders) {
+    if (!totalOrders || totalOrders < MIN_ORDERS_FOR_DISCOUNT) {
+        return { discountValue: 0, discountApplied: false, reason: `Faltam ${MIN_ORDERS_FOR_DISCOUNT - (totalOrders || 0)} pedidos para 10% OFF` };
+    }
+
+    if (subtotal < MIN_SUBTOTAL_FOR_DISCOUNT) {
+         return { discountValue: 0, discountApplied: false, reason: `Mínimo de ${formatBRL(MIN_SUBTOTAL_FOR_DISCOUNT)} no subtotal não atingido` };
+    }
+
+    const discount = subtotal * DISCOUNT_PERCENTAGE;
+    return { 
+        discountValue: discount, 
+        discountApplied: true,
+        reason: `Desconto Fidelidade (10% OFF - Nível: ${getLoyaltyLevel(totalOrders * POINTS_PER_ORDER).level})`
+    };
+}
+
 function formatCPFCNPJ(value) {
     // Placeholder: Retorna o valor sem formatação se a função real não estiver definida.
     // O usuário deve implementar a formatação real se necessário.
     return value || 'N/A';
+}
+
+/* =========================================================================
+   === NOVAS FUNÇÕES: CUPOM INTELIGENTE (SMART COUPON LOGIC) ===
+   ========================================================================= */
+
+/**
+ * [FUNÇÃO NOVA] Calcula os dias desde o último pedido do cliente.
+ * Assume que a data do último pedido está no objeto do cliente (lastOrderTimestamp).
+ * @param {Object} clientData - Dados do cliente.
+ * @returns {number} Dias de inatividade.
+ */
+function calculateDaysSinceLastOrder(clientData) {
+    const lastOrderTime = clientData.lastOrderTimestamp || clientData.lastOrderDate;
+    if (!lastOrderTime) return 999; // Se nunca pediu, considera-se inativo/novo.
+    
+    const now = Date.now();
+    const diffTime = now - lastOrderTime;
+    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * [FUNÇÃO NOVA] Encontra o ID do produto que o cliente mais comprou.
+ * @param {Array<Object>} clientOrders - Array de pedidos do cliente.
+ * @returns {string | null} ID do produto mais comprado ou null.
+ */
+function findMostFrequentProduct(clientOrders) {
+    if (!clientOrders || clientOrders.length === 0) return null;
+
+    const productCounts = {};
+    clientOrders.forEach(order => {
+        (order.items || []).forEach(item => { // Assume que o pedido tem um array 'items'
+            const productId = item.productId || item.name; // Usa ID ou Nome como fallback
+            productCounts[productId] = (productCounts[productId] || 0) + (item.qty || item.quantity || 1);
+        });
+    });
+
+    let topProduct = null;
+    let maxCount = 0;
+    
+    for (const productId in productCounts) {
+        if (productCounts[productId] > maxCount) {
+            maxCount = productCounts[productId];
+            topProduct = productId;
+        }
+    }
+    
+    // Assumindo que 'products' é um array global de produtos com 'id' e 'name'
+    const topProductDetails = window.products ? window.products.find(p => p.id === topProduct || p.name === topProduct) : null;
+
+    return topProductDetails || { id: topProduct, name: topProduct };
+}
+
+/**
+ * [FUNÇÃO NOVA] Gera o melhor cupom inteligente para o cliente.
+ * Prioriza: Inatividade > Área de Entrega > Produto Favorito.
+ * @param {Object} clientData - Dados do cliente (incluindo lastOrderTimestamp, address).
+ * @param {Array<Object>} clientOrders - Pedidos do cliente.
+ * @returns {Object | null} O objeto de cupom a ser sugerido ou null.
+ */
+function generateSmartCoupons(clientData, clientOrders) {
+    const coupons = [];
+    const config = SMART_COUPON_CONFIG;
+    const daysInactive = calculateDaysSinceLastOrder(clientData);
+
+    // 1. Checa Inatividade (Maior Prioridade)
+    if (config.inactivity.enabled && daysInactive >= config.inactivity.days) {
+        coupons.push({ 
+            ...config.inactivity, 
+            target: 'global',
+            ruleType: 'inactivity'
+        });
+    }
+
+    // 2. Checa Área de Entrega (Média Prioridade)
+    if (config.area.enabled) {
+        const clientArea = clientData.address ? (clientData.address.area || clientData.address) : '';
+        const areaRule = config.area.rules.find(rule => {
+            if (!rule.enabled) return false;
+            const areaStr = typeof clientArea === 'string' ? clientArea : '';
+            return areaStr.toLowerCase().includes(rule.areaName.toLowerCase());
+        });
+        if (areaRule) {
+            coupons.push({ 
+                code: areaRule.code,
+                type: areaRule.type,
+                value: areaRule.value,
+                description: areaRule.description,
+                priority: areaRule.priority,
+                target: 'global',
+                ruleType: 'area',
+                areaName: areaRule.areaName
+            });
+        }
+    }
+    
+    // 3. Checa Produto Favorito (Menor Prioridade)
+    if (config.product.enabled && coupons.length === 0) {
+        const topProduct = findMostFrequentProduct(clientOrders);
+        if (topProduct && topProduct.id) {
+            const productCode = config.product.codeFormat.replace('{PRODUCT}', topProduct.id.toString().slice(0, 4).toUpperCase());
+            coupons.push({
+                code: productCode,
+                type: 'product_percentage',
+                value: config.product.percentage,
+                target: topProduct.id,
+                description: `${config.product.percentage * 100}% OFF no seu item favorito: ${topProduct.name}`,
+                priority: config.product.priority,
+                ruleType: 'product',
+                productName: topProduct.name
+            });
+        }
+    }
+
+    // Seleciona o cupom de maior prioridade (menor número)
+    if (coupons.length > 0) {
+        coupons.sort((a, b) => a.priority - b.priority);
+        return coupons[0];
+    }
+
+    return null;
+}
+
+/**
+ * [FUNÇÃO NOVA] Renderiza a sugestão de cupom no Dashboard/Perfil do Cliente.
+ * @param {Object | null} smartCoupon - O cupom gerado por generateSmartCoupons.
+ */
+function renderSmartCouponOffer(smartCoupon) {
+    const profilePanel = document.getElementById("clientLoyaltyPanel"); // Reutiliza o painel de fidelidade ou crie um novo.
+    if (!profilePanel) return;
+    
+    const smartCouponHtml = document.createElement('div');
+    smartCouponHtml.id = 'smartCouponOffer';
+    smartCouponHtml.style.marginTop = '20px';
+    smartCouponHtml.style.padding = '15px';
+    smartCouponHtml.style.border = '2px solid #ff9800';
+    smartCouponHtml.style.borderRadius = '8px';
+    smartCouponHtml.style.background = '#fff3e0';
+    
+    if (smartCoupon) {
+        smartCouponHtml.innerHTML = `
+            <h5 style="margin-top:0; color:#ff9800;">🎁 Cupom Inteligente Disponível!</h5>
+            <p style="font-size: 14px; margin-bottom: 5px;">${smartCoupon.description}</p>
+            <div style="font-size: 18px; font-weight: bold; color: #d35400; text-align: center; border: 1px dashed #ffa726; padding: 5px; margin-top: 10px;">
+                CÓDIGO: ${smartCoupon.code}
+            </div>
+        `;
+    } else {
+        smartCouponHtml.innerHTML = `
+            <h5 style="margin-top:0; color:#4CAF50;">🎉 Sem Cupons Inteligentes no momento.</h5>
+            <p style="font-size: 14px; margin: 0;">Volte sempre! Seu histórico está excelente.</p>
+        `;
+    }
+    
+    // Adiciona abaixo do painel de Fidelidade/Loyalty
+    const existingOffer = document.getElementById('smartCouponOffer');
+    if (existingOffer) {
+        existingOffer.remove(); // Remove antes de adicionar o novo
+    }
+    profilePanel.parentNode.insertBefore(smartCouponHtml, profilePanel.nextSibling); 
+}
+
+/* =========================================================================
+   === FUNÇÕES DE GERENCIAMENTO: PAINEL DE CONTROLE ===
+   ========================================================================= */
+
+/**
+ * [FUNÇÃO NOVA] Salva a configuração de cupons inteligentes no Firebase/localStorage.
+ */
+async function saveSmartCouponConfig() {
+    try {
+        if (typeof DATA !== 'undefined' && DATA.restaurant) {
+            DATA.restaurant.smartCouponConfig = SMART_COUPON_CONFIG;
+            DATA.restaurant.smartCouponHistory = SMART_COUPON_HISTORY;
+            if (typeof saveMenuData === 'function') {
+                await saveMenuData();
+            }
+        }
+        // Fallback para localStorage
+        localStorage.setItem('smartCouponConfig', JSON.stringify(SMART_COUPON_CONFIG));
+        localStorage.setItem('smartCouponHistory', JSON.stringify(SMART_COUPON_HISTORY));
+        return true;
+    } catch (error) {
+        console.error('Erro ao salvar configuração de cupons:', error);
+        return false;
+    }
+}
+
+/**
+ * [FUNÇÃO NOVA] Carrega a configuração de cupons inteligentes.
+ */
+function loadSmartCouponConfig() {
+    try {
+        // Tenta carregar do DATA.restaurant primeiro
+        if (typeof DATA !== 'undefined' && DATA.restaurant && DATA.restaurant.smartCouponConfig) {
+            SMART_COUPON_CONFIG = DATA.restaurant.smartCouponConfig;
+            SMART_COUPON_HISTORY = DATA.restaurant.smartCouponHistory || [];
+            return;
+        }
+        // Fallback para localStorage
+        const savedConfig = localStorage.getItem('smartCouponConfig');
+        const savedHistory = localStorage.getItem('smartCouponHistory');
+        if (savedConfig) {
+            SMART_COUPON_CONFIG = JSON.parse(savedConfig);
+        }
+        if (savedHistory) {
+            SMART_COUPON_HISTORY = JSON.parse(savedHistory);
+        }
+    } catch (error) {
+        console.error('Erro ao carregar configuração de cupons:', error);
+    }
+}
+
+/**
+ * [FUNÇÃO NOVA] Calcula estatísticas dos cupons inteligentes.
+ */
+function getSmartCouponStats() {
+    const stats = {
+        totalGenerated: 0,
+        totalUsed: 0,
+        totalAvailable: 0,
+        totalExpired: 0,
+        totalDiscountGiven: 0,
+        byType: {
+            inactivity: { generated: 0, used: 0, discount: 0 },
+            area: { generated: 0, used: 0, discount: 0 },
+            product: { generated: 0, used: 0, discount: 0 }
+        }
+    };
+
+    SMART_COUPON_HISTORY.forEach(entry => {
+        stats.totalGenerated++;
+        
+        if (entry.status === 'used') {
+            stats.totalUsed++;
+            stats.totalDiscountGiven += entry.discountValue || 0;
+            if (entry.ruleType && stats.byType[entry.ruleType]) {
+                stats.byType[entry.ruleType].used++;
+                stats.byType[entry.ruleType].discount += entry.discountValue || 0;
+            }
+        } else if (entry.status === 'available') {
+            stats.totalAvailable++;
+        } else if (entry.status === 'expired') {
+            stats.totalExpired++;
+        }
+        
+        if (entry.ruleType && stats.byType[entry.ruleType]) {
+            stats.byType[entry.ruleType].generated++;
+        }
+    });
+
+    stats.usageRate = stats.totalGenerated > 0 
+        ? ((stats.totalUsed / stats.totalGenerated) * 100).toFixed(1)
+        : 0;
+
+    return stats;
+}
+
+/**
+ * [FUNÇÃO NOVA] Conta clientes elegíveis para cada regra.
+ */
+function getEligibleClientsCount() {
+    const counts = {
+        inactivity: 0,
+        area: {},
+        product: 0
+    };
+
+    // Precisa de acesso aos dados de clientes e pedidos
+    if (typeof window.orders === 'undefined') return counts;
+
+    const clientsMap = {};
+    window.orders.forEach(order => {
+        if (!order.userId) return;
+        if (!clientsMap[order.userId]) {
+            clientsMap[order.userId] = {
+                id: order.userId,
+                name: order.userName,
+                address: order.address,
+                lastOrderDate: order.createdAt,
+                orders: []
+            };
+        }
+        clientsMap[order.userId].orders.push(order);
+        if (order.createdAt > clientsMap[order.userId].lastOrderDate) {
+            clientsMap[order.userId].lastOrderDate = order.createdAt;
+        }
+    });
+
+    Object.values(clientsMap).forEach(client => {
+        // Inatividade
+        const daysInactive = calculateDaysSinceLastOrder({ lastOrderDate: client.lastOrderDate });
+        if (SMART_COUPON_CONFIG.inactivity.enabled && daysInactive >= SMART_COUPON_CONFIG.inactivity.days) {
+            counts.inactivity++;
+        }
+
+        // Área
+        if (SMART_COUPON_CONFIG.area.enabled) {
+            SMART_COUPON_CONFIG.area.rules.forEach(rule => {
+                if (!rule.enabled) return;
+                const clientArea = client.address || '';
+                const areaStr = typeof clientArea === 'string' ? clientArea : '';
+                if (areaStr.toLowerCase().includes(rule.areaName.toLowerCase())) {
+                    counts.area[rule.areaName] = (counts.area[rule.areaName] || 0) + 1;
+                }
+            });
+        }
+
+        // Produto (simplificado - conta quem tem histórico)
+        if (SMART_COUPON_CONFIG.product.enabled && client.orders.length >= SMART_COUPON_CONFIG.product.minPurchases) {
+            counts.product++;
+        }
+    });
+
+    return counts;
+}
+
+/**
+ * [FUNÇÃO NOVA] Registra o uso de um cupom inteligente.
+ */
+function logSmartCouponUsage(userId, userName, coupon, discountValue) {
+    if (!SMART_COUPON_CONFIG.advanced.trackUsage) return;
+
+    const entry = {
+        id: 'sc-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        userId: userId,
+        userName: userName,
+        couponCode: coupon.code,
+        ruleType: coupon.ruleType || 'unknown',
+        generatedAt: Date.now(),
+        expiresAt: Date.now() + (30 * 24 * 60 * 60 * 1000), // 30 dias
+        status: 'used',
+        usedAt: Date.now(),
+        discountValue: discountValue
+    };
+
+    SMART_COUPON_HISTORY.push(entry);
+    saveSmartCouponConfig();
+}
+
+/**
+ * [FUNÇÃO NOVA] Renderiza o painel de controle de cupons inteligentes no Admin.
+ */
+function renderSmartCouponAdminPanel() {
+    const panel = document.getElementById('smartCouponAdminPanel');
+    if (!panel) return;
+
+    const stats = getSmartCouponStats();
+    const eligibleCounts = getEligibleClientsCount();
+    const config = SMART_COUPON_CONFIG;
+
+    panel.innerHTML = `
+        <!-- DASHBOARD -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px;">
+            <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center;">
+                <div style="font-size: 24px; font-weight: bold; color: #1976d2;">${stats.totalGenerated}</div>
+                <div style="font-size: 12px; color: #666;">Cupons Gerados</div>
+            </div>
+            <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; text-align: center;">
+                <div style="font-size: 24px; font-weight: bold; color: #388e3c;">${stats.totalUsed}</div>
+                <div style="font-size: 12px; color: #666;">Cupons Usados</div>
+            </div>
+            <div style="background: #fff3e0; padding: 15px; border-radius: 8px; text-align: center;">
+                <div style="font-size: 24px; font-weight: bold; color: #f57c00;">${stats.usageRate}%</div>
+                <div style="font-size: 12px; color: #666;">Taxa de Uso</div>
+            </div>
+            <div style="background: #f3e5f5; padding: 15px; border-radius: 8px; text-align: center;">
+                <div style="font-size: 24px; font-weight: bold; color: #7b1fa2;">${formatBRL(stats.totalDiscountGiven)}</div>
+                <div style="font-size: 12px; color: #666;">Total Descontado</div>
+            </div>
+        </div>
+
+        <!-- REGRAS ATIVAS -->
+        <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+            <h6 style="margin: 0 0 10px 0; color: #333;">⚡ Regras Ativas</h6>
+            
+            <!-- Regra de Inatividade -->
+            <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid ${config.inactivity.enabled ? '#4caf50' : '#ccc'};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <div>
+                        <strong>${config.inactivity.enabled ? '✅' : '❌'} Inatividade</strong>
+                        <span style="color: #666; font-size: 12px; margin-left: 10px;">
+                            ${config.inactivity.days} dias → ${config.inactivity.code} (${config.inactivity.value * 100}% OFF)
+                        </span>
+                    </div>
+                    <div>
+                        <label style="cursor: pointer;">
+                            <input type="checkbox" id="toggleInactivity" ${config.inactivity.enabled ? 'checked' : ''} 
+                                   onchange="toggleSmartCouponRule('inactivity', this.checked)" />
+                            <span style="font-size: 12px; margin-left: 5px;">Ativo</span>
+                        </label>
+                    </div>
+                </div>
+                <div style="font-size: 12px; color: #666;">
+                    👥 ${eligibleCounts.inactivity} clientes elegíveis
+                    <button onclick="editSmartCouponRule('inactivity')" style="margin-left: 10px; padding: 2px 8px; font-size: 11px; background: #2196f3; color: white; border: none; border-radius: 4px; cursor: pointer;">✏️ Editar</button>
+                </div>
+            </div>
+
+            <!-- Regra de Área -->
+            <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid ${config.area.enabled ? '#4caf50' : '#ccc'};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <div>
+                        <strong>${config.area.enabled ? '✅' : '❌'} Área de Entrega</strong>
+                    </div>
+                    <div>
+                        <label style="cursor: pointer;">
+                            <input type="checkbox" id="toggleArea" ${config.area.enabled ? 'checked' : ''} 
+                                   onchange="toggleSmartCouponRule('area', this.checked)" />
+                            <span style="font-size: 12px; margin-left: 5px;">Ativo</span>
+                        </label>
+                    </div>
+                </div>
+                <div style="margin-left: 15px;">
+                    ${config.area.rules.map(rule => `
+                        <div style="font-size: 12px; color: #666; margin-bottom: 5px; padding: 5px; background: #f5f5f5; border-radius: 4px;">
+                            ${rule.enabled ? '✅' : '❌'} <strong>${rule.areaName}</strong>: ${rule.code} (${rule.type === 'fixed' ? formatBRL(rule.value) : rule.value * 100 + '%'} OFF)
+                            - 👥 ${eligibleCounts.area[rule.areaName] || 0} clientes
+                            <button onclick="editAreaRule('${rule.id}')" style="margin-left: 5px; padding: 2px 6px; font-size: 10px; background: #2196f3; color: white; border: none; border-radius: 3px; cursor: pointer;">✏️</button>
+                            <button onclick="deleteAreaRule('${rule.id}')" style="padding: 2px 6px; font-size: 10px; background: #f44336; color: white; border: none; border-radius: 3px; cursor: pointer;">🗑️</button>
+                        </div>
+                    `).join('')}
+                    <button onclick="addNewAreaRule()" style="margin-top: 5px; padding: 4px 10px; font-size: 11px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer;">+ Adicionar Área</button>
+                </div>
+            </div>
+
+            <!-- Regra de Produto -->
+            <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid ${config.product.enabled ? '#4caf50' : '#ccc'};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <div>
+                        <strong>${config.product.enabled ? '✅' : '❌'} Produto Favorito</strong>
+                        <span style="color: #666; font-size: 12px; margin-left: 10px;">
+                            ${config.product.percentage * 100}% OFF no item mais comprado
+                        </span>
+                    </div>
+                    <div>
+                        <label style="cursor: pointer;">
+                            <input type="checkbox" id="toggleProduct" ${config.product.enabled ? 'checked' : ''} 
+                                   onchange="toggleSmartCouponRule('product', this.checked)" />
+                            <span style="font-size: 12px; margin-left: 5px;">Ativo</span>
+                        </label>
+                    </div>
+                </div>
+                <div style="font-size: 12px; color: #666;">
+                    👥 ${eligibleCounts.product} clientes elegíveis
+                    <button onclick="editSmartCouponRule('product')" style="margin-left: 10px; padding: 2px 8px; font-size: 11px; background: #2196f3; color: white; border: none; border-radius: 4px; cursor: pointer;">✏️ Editar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- HISTÓRICO -->
+        <div style="background: #f9f9f9; padding: 15px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h6 style="margin: 0; color: #333;">📜 Histórico de Cupons</h6>
+                <button onclick="exportSmartCouponHistory()" style="padding: 5px 10px; font-size: 11px; background: #607d8b; color: white; border: none; border-radius: 4px; cursor: pointer;">📊 Exportar</button>
+            </div>
+            <div id="smartCouponHistoryList" style="max-height: 300px; overflow-y: auto;">
+                ${renderSmartCouponHistory()}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * [FUNÇÃO NOVA] Renderiza o histórico de cupons.
+ */
+function renderSmartCouponHistory() {
+    if (SMART_COUPON_HISTORY.length === 0) {
+        return '<div style="text-align: center; color: #999; padding: 20px;">Nenhum cupom gerado ainda</div>';
+    }
+
+    const recentHistory = SMART_COUPON_HISTORY.slice(-10).reverse();
+    
+    return recentHistory.map(entry => {
+        const statusColors = {
+            used: '#4caf50',
+            available: '#ff9800',
+            expired: '#9e9e9e'
+        };
+        const statusLabels = {
+            used: '✅ Usado',
+            available: '⏳ Disponível',
+            expired: '❌ Expirado'
+        };
+        
+        return `
+            <div style="background: white; padding: 10px; border-radius: 4px; margin-bottom: 8px; border-left: 3px solid ${statusColors[entry.status] || '#ccc'};">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${entry.userName || 'Cliente'}</strong>
+                        <span style="margin-left: 10px; padding: 2px 6px; background: #e0e0e0; border-radius: 3px; font-size: 11px;">${entry.couponCode}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 11px; color: ${statusColors[entry.status]};">${statusLabels[entry.status]}</div>
+                        <div style="font-size: 10px; color: #999;">${new Date(entry.generatedAt).toLocaleDateString('pt-BR')}</div>
+                    </div>
+                </div>
+                ${entry.discountValue ? `<div style="font-size: 11px; color: #666; margin-top: 5px;">Desconto: ${formatBRL(entry.discountValue)}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * [FUNÇÃO NOVA] Alterna ativação de uma regra.
+ */
+function toggleSmartCouponRule(ruleType, enabled) {
+    SMART_COUPON_CONFIG[ruleType].enabled = enabled;
+    saveSmartCouponConfig();
+    renderSmartCouponAdminPanel();
+    alert(`Regra "${ruleType}" ${enabled ? 'ativada' : 'desativada'} com sucesso!`);
+}
+
+/**
+ * [FUNÇÃO NOVA] Abre modal para editar regra.
+ */
+function editSmartCouponRule(ruleType) {
+    const config = SMART_COUPON_CONFIG[ruleType];
+    
+    if (ruleType === 'inactivity') {
+        const days = prompt('Dias de inatividade:', config.days);
+        const code = prompt('Código do cupom:', config.code);
+        const value = prompt('Percentual de desconto (0-1, ex: 0.15 para 15%):', config.value);
+        const description = prompt('Descrição:', config.description);
+        
+        if (days && code && value && description) {
+            config.days = parseInt(days);
+            config.code = code.toUpperCase();
+            config.value = parseFloat(value);
+            config.description = description;
+            saveSmartCouponConfig();
+            renderSmartCouponAdminPanel();
+            alert('Regra atualizada com sucesso!');
+        }
+    } else if (ruleType === 'product') {
+        const percentage = prompt('Percentual de desconto (0-1, ex: 0.20 para 20%):', config.percentage);
+        const minPurchases = prompt('Mínimo de compras do produto:', config.minPurchases);
+        
+        if (percentage && minPurchases) {
+            config.percentage = parseFloat(percentage);
+            config.minPurchases = parseInt(minPurchases);
+            saveSmartCouponConfig();
+            renderSmartCouponAdminPanel();
+            alert('Regra atualizada com sucesso!');
+        }
+    }
+}
+
+/**
+ * [FUNÇÃO NOVA] Adiciona nova regra de área.
+ */
+function addNewAreaRule() {
+    const areaName = prompt('Área de entrega:');
+    const code = prompt('Código do cupom:');
+    const type = confirm('Desconto fixo? (OK = Sim, Cancelar = Percentual)') ? 'fixed' : 'percentage';
+    const value = prompt(type === 'fixed' ? 'Valor fixo (R$):' : 'Percentual (0-1, ex: 0.15):');
+    const description = prompt('Descrição:');
+    
+    if (areaName && code && value && description) {
+        const newRule = {
+            id: 'area-' + Date.now(),
+            areaName: areaName,
+            code: code.toUpperCase(),
+            type: type,
+            value: parseFloat(value),
+            description: description,
+            priority: 2,
+            enabled: true
+        };
+        
+        SMART_COUPON_CONFIG.area.rules.push(newRule);
+        saveSmartCouponConfig();
+        renderSmartCouponAdminPanel();
+        alert('Área adicionada com sucesso!');
+    }
+}
+
+/**
+ * [FUNÇÃO NOVA] Edita regra de área existente.
+ */
+function editAreaRule(ruleId) {
+    const rule = SMART_COUPON_CONFIG.area.rules.find(r => r.id === ruleId);
+    if (!rule) return;
+    
+    const areaName = prompt('Área de entrega:', rule.areaName);
+    const code = prompt('Código do cupom:', rule.code);
+    const value = prompt(rule.type === 'fixed' ? 'Valor fixo (R$):' : 'Percentual (0-1):', rule.value);
+    const description = prompt('Descrição:', rule.description);
+    
+    if (areaName && code && value && description) {
+        rule.areaName = areaName;
+        rule.code = code.toUpperCase();
+        rule.value = parseFloat(value);
+        rule.description = description;
+        saveSmartCouponConfig();
+        renderSmartCouponAdminPanel();
+        alert('Área atualizada com sucesso!');
+    }
+}
+
+/**
+ * [FUNÇÃO NOVA] Remove regra de área.
+ */
+function deleteAreaRule(ruleId) {
+    if (!confirm('Tem certeza que deseja remover esta área?')) return;
+    
+    SMART_COUPON_CONFIG.area.rules = SMART_COUPON_CONFIG.area.rules.filter(r => r.id !== ruleId);
+    saveSmartCouponConfig();
+    renderSmartCouponAdminPanel();
+    alert('Área removida com sucesso!');
+}
+
+/**
+ * [FUNÇÃO NOVA] Exporta histórico de cupons.
+ */
+function exportSmartCouponHistory() {
+    if (SMART_COUPON_HISTORY.length === 0) {
+        alert('Nenhum histórico para exportar.');
+        return;
+    }
+    
+    const csv = [
+        ['Cliente', 'Cupom', 'Tipo', 'Status', 'Gerado Em', 'Usado Em', 'Desconto'].join(','),
+        ...SMART_COUPON_HISTORY.map(entry => [
+            entry.userName || 'N/A',
+            entry.couponCode,
+            entry.ruleType,
+            entry.status,
+            new Date(entry.generatedAt).toLocaleDateString('pt-BR'),
+            entry.usedAt ? new Date(entry.usedAt).toLocaleDateString('pt-BR') : 'N/A',
+            entry.discountValue ? formatBRL(entry.discountValue) : 'N/A'
+        ].join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cupons-inteligentes-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 // ==== Botão Sair do Perfil ====
@@ -669,6 +1503,10 @@ ${totalComandas > 0 ? `<div class="footer-line"><span>Comandas Avulsas:</span><s
               <span>Taxa de Entrega</span>
               <span id="deliveryFee">R$ 0,00</span>
             </div>
+            <div class="summary-row" id="loyaltyDiscountRow" style="display:none; color:#28a745;">
+              <span>Desconto Fidelidade</span>
+              <span id="loyaltyDiscountValue">- R$ 0,00</span>
+            </div>
             <div class="summary-row total">
               <span>Total</span>
               <span id="total">R$ 0,00</span>
@@ -956,6 +1794,16 @@ ${totalComandas > 0 ? `<div class="footer-line"><span>Comandas Avulsas:</span><s
                   <div id="couponsList" style="margin-bottom:10px;">
                     </div>
                   <button type="button" class="pill" id="btnAddCoupon" style="background:#e6ffe6; color:#28a745; margin-bottom:10px;">+ Criar Novo Cupom</button>
+                  
+                  <!-- NOVA SEÇÃO: CUPONS INTELIGENTES -->
+                  <div style="border-top: 2px solid #e0e0e0; margin: 30px 0; padding-top: 20px;">
+                    <h5 style="margin-bottom:15px; color:#ff9800;">🧠 Cupons Inteligentes (IA Leve)</h5>
+                    <div id="smartCouponAdminPanel">
+                      <!-- Painel será renderizado aqui -->
+                    </div>
+                  </div>
+                  <!-- FIM CUPONS INTELIGENTES -->
+                  
                   <div style="text-align:right;margin-top:16px">
                     <button type="submit" class="btn">Salvar Configurações</button>
                   </div>
@@ -1185,8 +2033,9 @@ ${totalComandas > 0 ? `<div class="footer-line"><span>Comandas Avulsas:</span><s
           <hr/>
         </div>
         
-        <!-- Painel Meu Consumo -->
-        <h4 style="margin-top:20px;">📊 Meu Consumo</h4>
+      <!-- Painel de "Meu Consumo" -->
+          <div id="clientLoyaltyPanel">
+          </div>      <h4 style="margin-top:20px;">📊 Meu Consumo</h4>
         <div id="myConsumptionPanel" style="
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1832,6 +2681,17 @@ function filterAndSortCustomers() {
         const lastOrderDate = u.lastOrderDate ? new Date(u.lastOrderDate).toLocaleDateString('pt-BR') : 'N/A';
         const totalSpent = formatBRL(u.totalSpent);
         
+        // =========================================================
+        // [NOVO] CHAMADA DE INJEÇÃO PARA STATUS DE CUPOM INTELIGENTE NO ADMIN
+        // =========================================================
+        const clientOrders = (orders || []).filter(o => o.userId === u.id); // Busca pedidos
+        const adminSmartCoupon = generateSmartCoupons(u, clientOrders);
+        
+        const smartCouponStatus = adminSmartCoupon 
+            ? `<div style="font-size:12px; color:#dc3545; font-weight:bold;">🏆 Cupom: ${adminSmartCoupon.code}</div>`
+            : `<div style="font-size:12px; color:#28a745;">Cupom: Nenhum</div>`;
+        // =========================================================
+        
         // Geração das tags
 	        // Geração das tags
 	        const tags = generateCustomerTags(u);
@@ -1881,9 +2741,11 @@ function filterAndSortCustomers() {
 	                    <div style="font-weight:bold;">${totalSpent}</div>
 	                    <div style="font-size:12px; color:#666;">${u.totalOrders} pedidos</div>
 	                </div>
-	                <div style="margin-top:10px; width:100%;">
-	                    ${tagsHtml}
-                    <button onclick="showOrderHistory('${u.id}', '${u.name}')" style="
+<div style="margin-top:10px; width:100%;">
+		                    ${tagsHtml}
+		                    ${renderLoyaltyBadge(u)}
+		                    ${smartCouponStatus}
+	                    <button onclick="showOrderHistory('${u.id}', '${u.name}')" style="
                         background-color: var(--primary);
                         color: white;
                         border: none;
@@ -2185,7 +3047,7 @@ let lastPendingCount = 0; // Para notificação
 
 
 const $ = sel => document.querySelector(sel);
-const formatBRL = v => "R$ " + (v || 0).toFixed(2).replace(".",",");
+
 
 // Funções de Storage (Mantidas para Carrinho e Login SIMPLIFICADO de Cliente)
 function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || []; }catch(e){ return []; } }
@@ -3030,10 +3892,25 @@ async function finalizeOrder(e) {
       
       // Incrementa o contador de uso do cupom
       if (appliedCoupon) {
-        const coupon = DATA.restaurant.coupons.find(c => c.id === appliedCoupon.id);
-        if (coupon) {
-          coupon.usedCount = (coupon.usedCount || 0) + 1;
-          await saveMenuData();
+        // Verifica se é cupom inteligente
+        if (appliedCoupon.isSmart) {
+          // Registra uso do cupom inteligente
+          const discountValue = appliedCoupon.type === 'percentage' 
+            ? newOrder.subtotal * appliedCoupon.value 
+            : appliedCoupon.value;
+          logSmartCouponUsage(
+            currentUser.id, 
+            currentUser.name || currentUser.email, 
+            appliedCoupon, 
+            discountValue
+          );
+        } else {
+          // Cupom manual
+          const coupon = DATA.restaurant.coupons.find(c => c.id === appliedCoupon.id);
+          if (coupon) {
+            coupon.usedCount = (coupon.usedCount || 0) + 1;
+            await saveMenuData();
+          }
         }
       }
       
@@ -3396,9 +4273,23 @@ function renderProfileOrders() {
   const userOrders = ((orders || [])).filter(o => o.userId === currentUser.id);
   
   // 1. Calcula as métricas e atualiza o Card de Status do Cliente
-  const metrics = calculateClientMetrics(userOrders);
-  
-  const status = getClientStatus(metrics.totalOrders);
+    const metrics = calculateClientMetrics(userOrders); // [Linha Existente]
+    
+    // =========================================================
+    // [NOVO] CHAMADA DE INJEÇÃO PARA PAINEL DE FIDELIDADE
+    // =========================================================
+    renderClientLoyaltyPanel(metrics); 
+    // =========================================================
+    
+    // =========================================================
+    // [NOVO] CHAMADA DE INJEÇÃO PARA CUPOM INTELIGENTE
+    // É essencial garantir que 'currentUser' e 'userOrders' estejam disponíveis.
+    // =========================================================
+    const smartCoupon = generateSmartCoupons(currentUser, userOrders);
+    renderSmartCouponOffer(smartCoupon);
+    // =========================================================
+    
+    const status = getClientStatus(metrics.totalOrders);
   const statusElement = document.querySelector("#clientStatusText");
   if (statusElement) {
       statusElement.textContent = status.text;
@@ -3850,6 +4741,33 @@ function renderCart(){
     
     document.querySelector("#subtotal").textContent = formatBRL(subtotal);
     document.querySelector("#btnViewCart").textContent = `Ver Carrinho (${cart.length})`;
+
+    // =========================================================
+    // [NOVO] CÁLCULO DE DESCONTO DE FIDELIDADE
+    // =========================================================
+    // Assumindo que o total de pedidos do usuário logado (currentUser) é conhecido ou buscado
+    const userTotalOrders = currentUser ? (currentUser.totalOrders || 0) : 0; 
+    const loyaltyDiscount = calculateLoyaltyDiscount(subtotal, userTotalOrders);
+    
+    const discountRow = document.getElementById("loyaltyDiscountRow");
+    const discountValueSpan = document.getElementById("loyaltyDiscountValue");
+
+    let totalDiscount = 0;
+    if (loyaltyDiscount.discountApplied) {
+        totalDiscount = loyaltyDiscount.discountValue;
+        discountValueSpan.textContent = `- ${formatBRL(totalDiscount)}`;
+        discountRow.style.display = 'flex';
+    } else {
+        discountRow.style.display = 'none';
+    }
+    // =========================================================
+
+    // CALCULAR O TOTAL FINAL COM O NOVO DESCONTO
+    const deliveryFee = parseFloat(document.getElementById("deliveryFee").textContent.replace(/[^\d,]/g, '').replace(',', '.')) || 0;
+    const finalTotal = subtotal + deliveryFee - totalDiscount;
+
+    // Atualiza os valores na tela
+    document.getElementById("total").textContent = formatBRL(finalTotal);
 
     list.querySelectorAll('[data-action="remove-item"]').forEach(btn => {
         btn.addEventListener('click', (e) => removeItemFromCart(e.target.dataset.index));
@@ -5805,6 +6723,7 @@ function loadStoreSettings() {
     document.querySelector("#restaurantLng").value = DATA.restaurant.restaurantLng || 0;
     
     renderCoupons();
+    renderSmartCouponAdminPanel(); // Renderiza painel de cupons inteligentes
 }
 
 // Função para geocodificar endereço usando LocationIQ (Mais precisa que Nominatim)
@@ -6104,6 +7023,36 @@ function applyCoupon() {
     messageEl.style.color = "#dc3545";
     return;
   }
+  
+  // =========================================================
+  // [NOVO] LÓGICA DE VALIDAÇÃO DE CUPOM INTELIGENTE
+  // =========================================================
+  // Assume que 'currentUser' e 'orders' são globais
+  const userOrders = currentUser ? (window.orders || []).filter(o => o.userId === currentUser.id) : [];
+  const smartCoupon = currentUser ? generateSmartCoupons(currentUser, userOrders) : null;
+  
+  if (smartCoupon && code === smartCoupon.code) {
+    // Encontrou um cupom inteligente válido!
+    console.log(`Cupom Inteligente '${smartCoupon.code}' aplicado com sucesso!`);
+    
+    // Cria um objeto de cupom compatível com a estrutura existente
+    appliedCoupon = {
+      ...smartCoupon,
+      id: 'smart-' + smartCoupon.code,
+      code: smartCoupon.code,
+      type: smartCoupon.type,
+      value: smartCoupon.value,
+      minSubtotal: 0, // Cupom inteligente não tem mínimo
+      active: true,
+      isSmart: true
+    };
+    
+    messageEl.textContent = `✅ ${smartCoupon.description}`;
+    messageEl.style.color = "#28a745";
+    updateCheckoutTotalWithCoupon();
+    return;
+  }
+  // =========================================================
   
   const coupon = DATA.restaurant.coupons.find(c => c.code === code);
   
@@ -8333,4 +9282,6 @@ window._updateOrderMotoboy = async function(orderId, motoboyId){
   }
 }
 // FIM: Lógica de Motoboy
+
+
 </script>
